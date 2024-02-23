@@ -34,7 +34,7 @@ func (g *Plugin) OnNodeAdd(obj interface{}) {
 		klog.Errorf("node is deleting:%v", node.Name)
 		return
 	}
-
+    // 获取节点的可分配资源。
 	allocatable := core.RunDecorateNode(node).Status.Allocatable
 
 	g.nodeResourceMapLock.Lock()
@@ -44,6 +44,7 @@ func (g *Plugin) OnNodeAdd(obj interface{}) {
 		return
 	}
 	g.nodeResourceMap[node.Name] = struct{}{}
+	// 更新节点上的资源计算也就是更新root quota中的资源的情况。。。
 	g.groupQuotaManager.UpdateClusterTotalResource(allocatable)
 	klog.V(5).Infof("OnNodeAddFunc success %v", node.Name)
 }

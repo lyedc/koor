@@ -208,34 +208,38 @@ func (qtw *RuntimeQuotaCalculator) updateQuotaTreeDimensionByResourceKeysNoLock(
 // should update reqLimit in the process, then increase globalRuntimeVersion
 // need use newMaxQuota to adjust dimension.
 // 更新最大的配额
+// 这里的quotaInfo是传入进来的qota的对象。
 func (qtw *RuntimeQuotaCalculator) updateOneGroupMaxQuota(quotaInfo *QuotaInfo) {
 	qtw.lock.Lock()
 	defer qtw.lock.Unlock()
-
+    // CalculateInfo.Max 表示的是qota资源中能最大分配的值。
 	for resKey := range quotaInfo.CalculateInfo.Max {
 		qtw.resourceKeys[resKey] = struct{}{}
 		if _, exist := qtw.quotaTree[resKey]; !exist {
 			// 初始化每种资源的配额组，但是不知道是干嘛用的。。quotaTree也就是叶子节点。
+			// 这里的 quotaTree表示的是某种资源的值，例如key是cpu
 			qtw.quotaTree[resKey] = NewQuotaTree()
 		}
 	}
 
 	localReqLimit := qtw.getGroupRequestLimitNoLock(quotaInfo.Name)
-	// 根据req的值，获取限制。不能大于父的配额组
+	// 根据req的值，获取限制。不能大于父的配额组。请求值，最小值，最大值的对比，拿到能使用的limit
 	newRequestLimit := quotaInfo.getLimitRequestNoLock()
 	// 获取了当前子配额组的请求限制和新的请求限制
 	for resKey := range qtw.resourceKeys {
 		// update/insert quotaNode
 		reqLimitPerKey := *newRequestLimit.Name(resKey, resource.DecimalSI)
-        // quotaNodes 对内部的request的值进行更新
+        // quotaNodes 对内部的request的值进行更新，找到某种资源的值，例如：cpu的，find出来的对象就是 NewQuotaTree
 		if exist, _ := qtw.quotaTree[resKey].find(quotaInfo.Name); exist {
 			// 更新一个nodequota，也就是一个叶子节点上的request的值，根据的是newRequestLimit返回的限制。
 			qtw.quotaTree[resKey].updateRequest(quotaInfo.Name, getQuantityValue(reqLimitPerKey, resKey))
 		} else {
+			// 第一次没有这个值，那么就新创建一个复制
 			sharedWeightPerKey := *quotaInfo.CalculateInfo.SharedWeight.Name(resKey, resource.DecimalSI)
 			autoScaleMinQuotaPerKey := *quotaInfo.CalculateInfo.AutoScaleMin.Name(resKey, resource.DecimalSI)
-			// 没有的话，就插入一个新的。有的话，就更新
+			// 没有的话，就插入一个新的。有的话，就更新，获取某种资源的例如：cpu的，权重，最大值，最小值           这个是limit的值，也就是request的值
 			qtw.quotaTree[resKey].insert(quotaInfo.Name, getQuantityValue(sharedWeightPerKey, resKey), getQuantityValue(reqLimitPerKey, resKey),
+				// 这里是min的值
 				getQuantityValue(autoScaleMinQuotaPerKey, resKey), quotaInfo.AllowLentResource)
 		}
 

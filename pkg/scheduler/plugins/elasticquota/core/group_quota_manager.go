@@ -366,7 +366,9 @@ func (gqm *GroupQuotaManager) buildSubParGroupTopoNoLock() {
 				Name: topoNode.quotaInfo.ParentName,
 			})
 		}
+		// 给叶子节点赋值他的父节点的信息，如果没有父节点的话，这里的父节点就是root节点。
 		topoNode.parQuotaTopoNode = parQuotaTopoNode
+		// 把自己加入到父节点的叶子节点中。形成一个树形的结构。
 		parQuotaTopoNode.addChildGroupQuotaInfo(topoNode)
 	}
 }
@@ -382,6 +384,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 		}
 		topoNode.quotaInfo.lock.Lock()
 		if !topoNode.quotaInfo.IsParent {
+			// 新加入的quota那么这里的request和user都是nil
 			childRequestMap[quotaName] = topoNode.quotaInfo.CalculateInfo.Request.DeepCopy()
 			childUsedMap[quotaName] = topoNode.quotaInfo.CalculateInfo.Used.DeepCopy()
 		}
@@ -402,6 +405,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 	gqm.updateResourceKeyNoLock()
 
 	// subGroup's topo relation may change; refresh the request/used from bottom to top
+	// 从上到下更新节点上的 request和used的信息。。
 	for quotaName, topoNode := range gqm.quotaTopoNodeMap {
 		if !topoNode.quotaInfo.IsParent {
 			gqm.updateGroupDeltaRequestNoLock(quotaName, childRequestMap[quotaName])
@@ -413,6 +417,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 // ResetAllGroupQuotaRecursiveNoLock no need to lock gqm.lock
 // 遍历每个配额组的子配额组，并对其进行递归地调用，以确保所有子配额组的配额信息都被正确地重置
 func (gqm *GroupQuotaManager) resetAllGroupQuotaRecursiveNoLock(rootNode *QuotaTopoNode) {
+	// 获取全部的叶子节点的资源信息。
 	childGroupQuotaInfos := rootNode.getChildGroupQuotaInfos()
 	for subName, topoNode := range childGroupQuotaInfos {
 		gqm.runtimeQuotaCalculatorMap[subName] = NewRuntimeQuotaCalculator(subName)
@@ -433,6 +438,7 @@ func (gqm *GroupQuotaManager) updateOneGroupMaxQuotaNoLock(quotaInfo *QuotaInfo)
 	defer quotaInfo.lock.Unlock()
 	// 获取父配额组的运行时配额计算器
 	// 这里返回的是NewRuntimeQuotaCalculator(extension.RootQuotaName) 这个对象
+	// 这里的runtimeQuota是父节点的信息。quotaInfo是子节点的信息。
 	runtimeQuotaCalculator := gqm.getRuntimeQuotaCalculatorByNameNoLock(quotaInfo.ParentName)
 	runtimeQuotaCalculator.updateOneGroupMaxQuota(quotaInfo)
 }
@@ -628,12 +634,12 @@ func (gqm *GroupQuotaManager) GetQuotaSummaries() map[string]*QuotaInfoSummary {
 func (gqm *GroupQuotaManager) OnPodAdd(quotaName string, pod *v1.Pod) {
 	gqm.hierarchyUpdateLock.RLock()
 	defer gqm.hierarchyUpdateLock.RUnlock()
-
+    // 获取对应的资源对象
 	quotaInfo := gqm.getQuotaInfoByNameNoLock(quotaName)
 	if quotaInfo != nil && quotaInfo.isPodExist(pod) {
 		return
 	}
-
+   // pod的信息添加到quta的PodCache对象中
 	gqm.updatePodCacheNoLock(quotaName, pod, true)
 	gqm.updatePodRequestNoLock(quotaName, nil, pod)
 	// in case failOver, update pod isAssigned explicitly according to its phase and NodeName.

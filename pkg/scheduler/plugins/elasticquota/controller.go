@@ -89,6 +89,7 @@ func (ctrl *Controller) Run() {
 }
 
 // syncHandler syncs elastic quotas with local and convert status.used/request/runtime
+// todo: 这里是给qota中的anntion中写入值。
 func (ctrl *Controller) syncHandler() []error {
 	eqList, err := ctrl.eqLister.List(labels.Everything())
 	if err != nil {
@@ -151,6 +152,7 @@ func (ctrl *Controller) syncHandler() []error {
 				errors = append(errors, err)
 				return
 			}
+			// 通过patch更新quota中的值。
 			err = koordutil.RetryOnConflictOrTooManyRequests(func() error {
 				_, patchErr := ctrl.schedClient.SchedulingV1alpha1().ElasticQuotas(eq.Namespace).
 					Patch(context.TODO(), eq.Name, types.MergePatchType,

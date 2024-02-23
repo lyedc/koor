@@ -119,6 +119,7 @@ func New(args runtime.Object, handle framework.Handle) (framework.Plugin, error)
 	elasticQuota.createDefaultQuotaIfNotPresent()
 	frameworkexthelper.ForceSyncFromInformer(ctx.Done(), scheSharedInformerFactory, elasticQuotaInformer.Informer(), cache.ResourceEventHandlerFuncs{
 		AddFunc:    elasticQuota.OnQuotaAdd,
+		// add 和 update的基本逻辑一样。
 		UpdateFunc: elasticQuota.OnQuotaUpdate,
 		DeleteFunc: elasticQuota.OnQuotaDelete,
 	})
@@ -126,12 +127,14 @@ func New(args runtime.Object, handle framework.Handle) (framework.Plugin, error)
 	nodeInformer := handle.SharedInformerFactory().Core().V1().Nodes().Informer()
 	frameworkexthelper.ForceSyncFromInformer(ctx.Done(), handle.SharedInformerFactory(), nodeInformer, cache.ResourceEventHandlerFuncs{
 		AddFunc:    elasticQuota.OnNodeAdd,
+		// add 和update类型的资源计算类似，计算增量，然后更新root中的资源总量的情况。
 		UpdateFunc: elasticQuota.OnNodeUpdate,
 		DeleteFunc: elasticQuota.OnNodeDelete,
 	})
 
 	podInformer := handle.SharedInformerFactory().Core().V1().Pods().Informer()
 	frameworkexthelper.ForceSyncFromInformer(ctx.Done(), handle.SharedInformerFactory(), podInformer, cache.ResourceEventHandlerFuncs{
+		// 根据最终的申请量回去更新： RuntimeQuotaCalculator中的参数
 		AddFunc:    elasticQuota.OnPodAdd,
 		UpdateFunc: elasticQuota.OnPodUpdate,
 		DeleteFunc: elasticQuota.OnPodDelete,
@@ -143,6 +146,7 @@ func New(args runtime.Object, handle framework.Handle) (framework.Plugin, error)
 }
 
 func (g *Plugin) Start() {
+	// 定时聚合 default中的quota的值，到pod对应的qota中的值。
 	go wait.Until(g.migrateDefaultQuotaGroupsPod, MigrateDefaultQuotaGroupsPodCycle, nil)
 	klog.Infof("start migrate pod from defaultQuotaGroup")
 }
@@ -204,6 +208,7 @@ func (g *Plugin) AddPod(ctx context.Context, state *framework.CycleState, podToS
 	}
 	pod := core.RunDecoratePod(podInfoToAdd.Pod)
 	podReq, _ := resource.PodRequestsAndLimits(pod)
+	// 当pod被分配后这里记录pod的使用量
 	quotaInfo.CalculateInfo.Used = quotav1.Add(quotaInfo.CalculateInfo.Used, podReq)
 	return framework.NewStatus(framework.Success, "")
 }

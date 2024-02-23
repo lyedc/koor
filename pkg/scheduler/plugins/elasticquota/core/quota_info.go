@@ -39,6 +39,7 @@ type QuotaCalculateInfo struct {
 	// to ensure the correctness and fairness of min
 	AutoScaleMin v1.ResourceList
 	// All assigned pods used
+	// // 当pod被分配后这里记录pod的使用量 在plugin的addPod方法中设置这个值。
 	Used v1.ResourceList
 	// All pods request
 	Request v1.ResourceList

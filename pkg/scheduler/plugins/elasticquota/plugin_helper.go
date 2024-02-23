@@ -44,6 +44,7 @@ func (g *Plugin) getPodAssociateQuotaName(pod *v1.Pod) string {
 		quotaName = GetQuotaName(g.quotaLister, pod)
 	}
 	// can't get the quotaInfo by quotaName, let the pod belongs to DefaultQuotaGroup
+	// 获取pod对应的qota
 	if g.groupQuotaManager.GetQuotaInfoByName(quotaName) == nil {
 		quotaName = extension.DefaultQuotaName
 	}
