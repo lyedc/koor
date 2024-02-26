@@ -331,7 +331,8 @@ func (qtw *RuntimeQuotaCalculator) needUpdateOneGroupRequest(quotaInfo *QuotaInf
 func (qtw *RuntimeQuotaCalculator) updateOneGroupRequest(quotaInfo *QuotaInfo) {
 	qtw.lock.Lock()
 	defer qtw.lock.Unlock()
-
+    // 存储的是每个quota对象的资源的配额的信息。
+    //  // all childQuotaInfos' limitedRequest
 	reqLimit := qtw.getGroupRequestLimitNoLock(quotaInfo.Name)
 	newReqLimit := quotaInfo.getLimitRequestNoLock()
 	for resKey := range qtw.resourceKeys {
@@ -339,6 +340,7 @@ func (qtw *RuntimeQuotaCalculator) updateOneGroupRequest(quotaInfo *QuotaInfo) {
 		reqLimitPerKey := *newReqLimit.Name(resKey, resource.DecimalSI)
 
 		if exist, _ := qtw.quotaTree[resKey].find(quotaInfo.Name); exist {
+			// 更新quotaNode中的request的值，quotaNode为树种的一个子节点。。
 			qtw.quotaTree[resKey].updateRequest(quotaInfo.Name, getQuantityValue(reqLimitPerKey, resKey))
 		} else {
 			sharedWeightPerKey := *quotaInfo.CalculateInfo.SharedWeight.Name(resKey, resource.DecimalSI)

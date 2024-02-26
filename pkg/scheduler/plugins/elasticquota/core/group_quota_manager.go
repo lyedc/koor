@@ -126,29 +126,34 @@ func (gqm *GroupQuotaManager) updateGroupDeltaRequestNoLock(quotaName string, de
 	}
 
 	defer gqm.scopedLockForQuotaInfo(curToAllParInfos)()
-
+    // // 根据quotaInfo中的limit，计算出最大的request的值，更新到quotaNode中。
 	gqm.recursiveUpdateGroupTreeWithDeltaRequest(deltaReq, curToAllParInfos)
 }
 
 // recursiveUpdateGroupTreeWithDeltaRequest update the quota of a node, also need update all parentNode, the lock operation
 // of all quotaInfo is done by gqm. scopedLockForQuotaInfo, so just get treeWrappers' lock when calling treeWrappers' function
+// 根据请求的差量来从下到上更新整个tree中的节点上的request的值，quotaNode中存储的值。
+// // 根据quotaInfo中的limit，计算出最大的request的值，更新到quotaNode中。
 func (gqm *GroupQuotaManager) recursiveUpdateGroupTreeWithDeltaRequest(deltaReq v1.ResourceList, curToAllParInfos []*QuotaInfo) {
 	for i := 0; i < len(curToAllParInfos); i++ {
 		curQuotaInfo := curToAllParInfos[i]
 		oldSubLimitReq := curQuotaInfo.getLimitRequestNoLock()
+		// 计算request的值，并更新到quotaInfo的CalculateInfo对象中。
 		curQuotaInfo.addRequestNonNegativeNoLock(deltaReq)
 		if curQuotaInfo.Name == extension.SystemQuotaName || curQuotaInfo.Name == extension.DefaultQuotaName {
 			return
 		}
 		newSubLimitReq := curQuotaInfo.getLimitRequestNoLock()
 		deltaReq = quotav1.Subtract(newSubLimitReq, oldSubLimitReq)
-
+       // 返回的对象的作用：
+       // RuntimeQuotaCalculator 结构体的主要功能是针对某个特定的配额信息（treeName），计算子配额组在该配额信息下的运行配额
 		directParRuntimeCalculatorPtr := gqm.getRuntimeQuotaCalculatorByNameNoLock(curQuotaInfo.ParentName)
 		if directParRuntimeCalculatorPtr == nil {
 			klog.Errorf("treeWrapper not exist! quotaName:%v  parentName:%v", curQuotaInfo.Name, curQuotaInfo.ParentName)
 			return
 		}
 		if directParRuntimeCalculatorPtr.needUpdateOneGroupRequest(curQuotaInfo) {
+			// 传入的对象是：具体的当前某个字配额的信息。
 			directParRuntimeCalculatorPtr.updateOneGroupRequest(curQuotaInfo)
 		}
 	}
@@ -156,6 +161,7 @@ func (gqm *GroupQuotaManager) recursiveUpdateGroupTreeWithDeltaRequest(deltaReq 
 
 // updateGroupDeltaUsedNoLock updates the usedQuota of a node, it also updates all parent nodes
 // no need to lock gqm.hierarchyUpdateLock
+// 更新节点的use信息，并从更新父节点也就是整个树的情况。
 func (gqm *GroupQuotaManager) updateGroupDeltaUsedNoLock(quotaName string, delta v1.ResourceList) {
 	curToAllParInfos := gqm.getCurToAllParentGroupQuotaInfoNoLock(quotaName)
 	allQuotaInfoLen := len(curToAllParInfos)
@@ -277,7 +283,13 @@ func (gqm *GroupQuotaManager) GetQuotaInfoByName(quotaName string) *QuotaInfo {
 func (gqm *GroupQuotaManager) getQuotaInfoByNameNoLock(quotaName string) *QuotaInfo {
 	return gqm.quotaInfoMap[quotaName]
 }
+// 返回的是：
+/*
+这个结构体的作用是帮助计算子配额组在对应的配额信息（treeName）下，所有资源维度的运行配额。
 
+基于这段注释，可以推断出 RuntimeQuotaCalculator 结构体的主要功能是针对某个特定的配额信息（treeName），
+计算子配额组在该配额信息下的运行配额。这个结构体可能会提供一系列方法来执行这个计算过程，并可能包含与配额相关的信息和逻辑
+*/
 func (gqm *GroupQuotaManager) getRuntimeQuotaCalculatorByNameNoLock(quotaName string) *RuntimeQuotaCalculator {
 	return gqm.runtimeQuotaCalculatorMap[quotaName]
 }
@@ -408,6 +420,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 	// 从上到下更新节点上的 request和used的信息。。
 	for quotaName, topoNode := range gqm.quotaTopoNodeMap {
 		if !topoNode.quotaInfo.IsParent {
+			// 更新tree结构中的request的值，
 			gqm.updateGroupDeltaRequestNoLock(quotaName, childRequestMap[quotaName])
 			gqm.updateGroupDeltaUsedNoLock(quotaName, childUsedMap[quotaName])
 		}
@@ -516,6 +529,7 @@ func (gqm *GroupQuotaManager) updatePodRequestNoLock(quotaName string, oldPod, n
 	if quotav1.IsZero(deltaReq) {
 		return
 	}
+	// // 根据quotaInfo中的limit，计算出最大的request的值，更新到quotaNode中。
 	gqm.updateGroupDeltaRequestNoLock(quotaName, deltaReq)
 }
 
@@ -574,6 +588,7 @@ func (gqm *GroupQuotaManager) UpdatePodIsAssigned(quotaName string, pod *v1.Pod,
 
 func (gqm *GroupQuotaManager) updatePodIsAssignedNoLock(quotaName string, pod *v1.Pod, isAssigned bool) error {
 	quotaInfo := gqm.getQuotaInfoByNameNoLock(quotaName)
+	// 在quota的cache标记这个pod已经被调度了。。
 	return quotaInfo.UpdatePodIsAssigned(pod, isAssigned)
 }
 
@@ -584,19 +599,25 @@ func (gqm *GroupQuotaManager) getPodIsAssignedNoLock(quotaName string, pod *v1.P
 	}
 	return quotaInfo.GetPodIsAssigned(pod)
 }
-
+// out in 一个表示资源的出借，一个表示资源的借用，可以这样理解。
 func (gqm *GroupQuotaManager) MigratePod(pod *v1.Pod, out, in string) {
 	gqm.hierarchyUpdateLock.Lock()
 	defer gqm.hierarchyUpdateLock.Unlock()
 
 	isAssigned := gqm.getPodIsAssignedNoLock(out, pod)
+	// 更新quotaNode中存储的request的值，
 	gqm.updatePodRequestNoLock(out, pod, nil)
+	// 更新 quotaInfo中CalculateInfo中use的值
 	gqm.updatePodUsedNoLock(out, pod, nil)
+	// 从podcache中移除改pod
 	gqm.updatePodCacheNoLock(out, pod, false)
 
 	gqm.updatePodCacheNoLock(in, pod, true)
 	gqm.updatePodIsAssignedNoLock(in, pod, isAssigned)
+	// 通过计算新pod和旧pod的差额。来更新quotaNode上面的值。也就是整个树上的值。
+	// 根据quotaInfo中的limit，计算出最大的request的值，更新到quotaNode中。
 	gqm.updatePodRequestNoLock(in, nil, pod)
+	// 根据差值，计算quotaInfo中的Use的值，使用量。
 	gqm.updatePodUsedNoLock(in, nil, pod)
 	klog.V(5).Infof("migrate pod :%v from quota:%v to quota:%v, podPhase:%v", pod.Name, out, in, pod.Status.Phase)
 }
@@ -641,10 +662,16 @@ func (gqm *GroupQuotaManager) OnPodAdd(quotaName string, pod *v1.Pod) {
 	}
    // pod的信息添加到quta的PodCache对象中
 	gqm.updatePodCacheNoLock(quotaName, pod, true)
+	// 更新tree结构中的request的值，quotaNode,下面是node和info的关系。
+	// quotaNode stores the corresponding quotaInfo's information in a specific resource dimension.
+	// "quotaNode" 负责管理和存储系统中特定类型或维度资源的配额信息
+	// 貌似是从info中取值，计算后计入到node当中。
 	gqm.updatePodRequestNoLock(quotaName, nil, pod)
 	// in case failOver, update pod isAssigned explicitly according to its phase and NodeName.
 	if pod.Spec.NodeName != "" && !util.IsPodTerminated(pod) {
+		// 在对象 QuotaInfo 中的cache中标记改pod已经被调度。
 		gqm.updatePodIsAssignedNoLock(quotaName, pod, true)
+		// 跟新QuotaInfo对象。
 		gqm.updatePodUsedNoLock(quotaName, nil, pod)
 	}
 }
