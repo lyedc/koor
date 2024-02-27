@@ -208,7 +208,7 @@ func (qtw *RuntimeQuotaCalculator) updateQuotaTreeDimensionByResourceKeysNoLock(
 // should update reqLimit in the process, then increase globalRuntimeVersion
 // need use newMaxQuota to adjust dimension.
 // 更新最大的配额
-// 这里的quotaInfo是传入进来的qota的对象。
+// 这里的quotaInfo是传入进来的qota的对象。这里就是父节点的runtimequotaCalculator去更新子节点的资源，quotaInfo是子节点的信息。
 func (qtw *RuntimeQuotaCalculator) updateOneGroupMaxQuota(quotaInfo *QuotaInfo) {
 	qtw.lock.Lock()
 	defer qtw.lock.Unlock()

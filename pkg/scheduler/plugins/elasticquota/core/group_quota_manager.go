@@ -95,9 +95,13 @@ func (gqm *GroupQuotaManager) UpdateClusterTotalResource(deltaRes v1.ResourceLis
 
 // updateClusterTotalResourceNoLock no need to lock gqm.hierarchyUpdateLock and system/defaultQuotaGroup's lock
 func (gqm *GroupQuotaManager) updateClusterTotalResourceNoLock(deltaRes v1.ResourceList) {
+	fmt.Println(gqm.totalResource.Cpu().Value())
+	fmt.Println(gqm.totalResource.Memory().Value())
 	gqm.totalResource = quotav1.Add(gqm.totalResource, deltaRes)
 
 	sysAndDefaultUsed := gqm.quotaInfoMap[extension.DefaultQuotaName].CalculateInfo.Used.DeepCopy()
+	fmt.Println(sysAndDefaultUsed.Cpu().Value())
+	fmt.Println(sysAndDefaultUsed.Memory().Value())
 	sysAndDefaultUsed = quotav1.Add(sysAndDefaultUsed, gqm.quotaInfoMap[extension.SystemQuotaName].CalculateInfo.Used.DeepCopy())
 	totalResNoSysOrDefault := quotav1.Subtract(gqm.totalResource, sysAndDefaultUsed)
 
@@ -126,7 +130,7 @@ func (gqm *GroupQuotaManager) updateGroupDeltaRequestNoLock(quotaName string, de
 	}
 
 	defer gqm.scopedLockForQuotaInfo(curToAllParInfos)()
-    // // 根据quotaInfo中的limit，计算出最大的request的值，更新到quotaNode中。
+    // // 根据quotaInfo中的limit，计算出最大的request的值，更新到QuotaTree中的quotaNode中。
 	gqm.recursiveUpdateGroupTreeWithDeltaRequest(deltaReq, curToAllParInfos)
 }
 
@@ -412,7 +416,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 	gqm.runtimeQuotaCalculatorMap[extension.RootQuotaName] = NewRuntimeQuotaCalculator(extension.RootQuotaName)
 	gqm.runtimeQuotaCalculatorMap[extension.RootQuotaName].setClusterTotalResource(gqm.totalResourceExceptSystemAndDefaultUsed)
 	rootNode := gqm.quotaTopoNodeMap[extension.RootQuotaName]
-	// 递归遍历每个group中的子group重置里卖弄的配额组的信息。保证正确性
+	// 递归遍历每个group中的子group重置里卖弄的配额组的信息。保证正确性 通过父节点的runtime方法计算子节点最大，最小等情况，计算的结果被存储在RuntimeQuotaCalculator的quotaTree中。
 	gqm.resetAllGroupQuotaRecursiveNoLock(rootNode)
 	gqm.updateResourceKeyNoLock()
 
@@ -428,7 +432,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 }
 
 // ResetAllGroupQuotaRecursiveNoLock no need to lock gqm.lock
-// 遍历每个配额组的子配额组，并对其进行递归地调用，以确保所有子配额组的配额信息都被正确地重置
+// 遍历每个配额组的子配额组，并对其进行递归地调用，以确保所有子配额组的配额信息都被正确地重置，这几个组合起来就是通过父节点的runtime方法计算子节点最大，最小等情况，计算的结果被存储在RuntimeQuotaCalculator的quotaTree中。
 func (gqm *GroupQuotaManager) resetAllGroupQuotaRecursiveNoLock(rootNode *QuotaTopoNode) {
 	// 获取全部的叶子节点的资源信息。
 	childGroupQuotaInfos := rootNode.getChildGroupQuotaInfos()
@@ -521,6 +525,8 @@ func (gqm *GroupQuotaManager) updatePodRequestNoLock(quotaName string, oldPod, n
 
 	if newPod != nil {
 		newPodReq, _ = resource.PodRequestsAndLimits(newPod)
+		fmt.Println(newPodReq.Cpu().Value())
+		fmt.Println(newPodReq.Memory().Value())
 	} else {
 		newPodReq = make(v1.ResourceList)
 	}
@@ -655,7 +661,7 @@ func (gqm *GroupQuotaManager) GetQuotaSummaries() map[string]*QuotaInfoSummary {
 func (gqm *GroupQuotaManager) OnPodAdd(quotaName string, pod *v1.Pod) {
 	gqm.hierarchyUpdateLock.RLock()
 	defer gqm.hierarchyUpdateLock.RUnlock()
-    // 获取对应的资源对象
+    // 获取对应的资源对象，如果pod中定义的quota不存在就默认使用default的quota，也就是root的。
 	quotaInfo := gqm.getQuotaInfoByNameNoLock(quotaName)
 	if quotaInfo != nil && quotaInfo.isPodExist(pod) {
 		return

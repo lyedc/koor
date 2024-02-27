@@ -32,7 +32,7 @@ func (g *Plugin) OnPodAdd(obj interface{}) {
 	}
 
 	pod = core.RunDecoratePod(pod)
-	quotaName := g.getPodAssociateQuotaName(pod)
+	quotaName := g.getPodAssociateQuotaName(pod) // 这里的pod指定的quotaName如果不能存在就自己转义到root上面去。
 	g.groupQuotaManager.OnPodAdd(quotaName, pod)
 	klog.V(5).Infof("OnPodAddFunc %v.%v add success, quotaName:%v", pod.Namespace, pod.Name, quotaName)
 }
