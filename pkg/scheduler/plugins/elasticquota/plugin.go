@@ -171,17 +171,19 @@ func (g *Plugin) PreFilter(ctx context.Context, state *framework.CycleState, pod
 	g.snapshotPostFilterState(quotaName, state)
 	quotaUsed := quotaInfo.GetUsed()
 	quotaRuntime := quotaInfo.GetRuntime()
+	// runtime表示quota能正常分配的资源，也就是被pod分配的资源，runtime的资源的大小介于 min和max之间。
+	// runtime的计算参考: https://koordinator.sh/zh-Hans/docs/v1.2/designs/multi-hierarchy-elastic-quota-management/
 
 	pod = core.RunDecoratePod(pod)
 	podRequest, _ := resource.PodRequestsAndLimits(pod)
 	newUsed := quotav1.Add(podRequest, quotaUsed)
-
+	// 这里是这样计算的。我们将检查 (Pod.request + Quota.Used) 是否小于 Quota.Runtime。否则，Pod的调度周期就会失败
 	if isLessEqual, exceedDimensions := quotav1.LessThanOrEqual(newUsed, quotaRuntime); !isLessEqual {
 		return framework.NewStatus(framework.Unschedulable, fmt.Sprintf("Scheduling refused due to insufficient quotas, "+
 			"quotaName: %v, runtime: %v, used: %v, pod's request: %v, exceedDimensions: %v",
 			quotaName, printResourceList(quotaRuntime), printResourceList(quotaUsed), printResourceList(podRequest), exceedDimensions))
 	}
-
+    // 用于检测父级别的资源是否满足。如果不满足就直接禁止调度了。
 	if *g.pluginArgs.EnableCheckParentQuota {
 		return g.checkQuotaRecursive(quotaName, []string{quotaName}, podRequest)
 	}
