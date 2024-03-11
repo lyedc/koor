@@ -226,11 +226,13 @@ func (g *gpuDeviceManager) getContainerGPUUsage(podParentDir string, c *corev1.C
 func (g *gpuDeviceManager) collectGPUUsage() {
 	processesGPUUsages := make(map[uint32][]*rawGPUMetric)
 	for deviceIndex, gpuDevice := range g.devices {
+		// 从驱动层面获取gpu的使用情况。直接调用的是nvml库。
 		processesInfos, ret := gpuDevice.Device.GetComputeRunningProcesses()
 		if ret != nvml.SUCCESS {
 			klog.Warningf("Unable to get process info for device at index %d: %v", deviceIndex, nvml.ErrorString(ret))
 			continue
 		}
+		// 获取进程的使用情况。
 		processUtilizations, ret := gpuDevice.Device.GetProcessUtilization(1024)
 		if ret != nvml.SUCCESS {
 			klog.Warningf("Unable to get process utilization for device at index %d: %v", deviceIndex, nvml.ErrorString(ret))
