@@ -195,6 +195,7 @@ func (cs *Coscheduling) Permit(ctx context.Context, state *framework.CycleState,
 		// We will also request to move the sibling pods back to activeQ.
 		cs.pgMgr.ActivateSiblings(pod, state)
 	case core.Success:
+		// gang 满足pod的最小需求，允许进行绑定调度
 		cs.pgMgr.AllowGangGroup(pod, cs.frameworkHandler, Name)
 		retStatus = framework.NewStatus(framework.Success)
 		waitTime = 0

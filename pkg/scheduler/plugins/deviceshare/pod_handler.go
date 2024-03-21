@@ -32,6 +32,7 @@ import (
 func registerPodEventHandler(deviceCache *nodeDeviceCache, sharedInformerFactory informers.SharedInformerFactory) {
 	podInformer := sharedInformerFactory.Core().V1().Pods().Informer()
 	eventHandler := cache.ResourceEventHandlerFuncs{
+		// 根据pod的情况，填充NodeDevice中的使用，分配已经剩余的情况
 		AddFunc:    deviceCache.onPodAdd,
 		UpdateFunc: deviceCache.onPodUpdate,
 		DeleteFunc: deviceCache.onPodDelete,

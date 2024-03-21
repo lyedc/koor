@@ -30,7 +30,9 @@ import (
 func registerDeviceEventHandler(deviceCache *nodeDeviceCache, koordSharedInformerFactory koordinatorinformers.SharedInformerFactory) {
 	deviceInformer := koordSharedInformerFactory.Scheduling().V1alpha1().Devices().Informer()
 	eventHandler := cache.ResourceEventHandlerFuncs{
+		// nodeDeviceCache 更新该对象中的gpu设备的情况。也就是把device 的crd中的情况更新到缓存中。
 		AddFunc:    deviceCache.onDeviceAdd,
+		// 和 add同样的逻辑。
 		UpdateFunc: deviceCache.onDeviceUpdate,
 		DeleteFunc: deviceCache.onDeviceDelete,
 	}

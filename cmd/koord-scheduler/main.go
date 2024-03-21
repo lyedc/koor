@@ -65,7 +65,7 @@ var koordinatorPlugins = map[string]frameworkruntime.PluginFactory{
 		  kubernetes.io/batch-memory: 36Mi
 	*/
 	batchresource.Name: batchresource.New,
-	// GangScheduling调度
+	// GangScheduling调度,也就是podGroup的调度
 	coscheduling.Name: coscheduling.New,
 	//gpu调度
 	deviceshare.Name: deviceshare.New,

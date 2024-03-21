@@ -52,6 +52,7 @@ type nodeDevice struct {
 	deviceTotal map[schedulingv1alpha1.DeviceType]deviceResources
 	deviceFree  map[schedulingv1alpha1.DeviceType]deviceResources
 	deviceUsed  map[schedulingv1alpha1.DeviceType]deviceResources
+	// 设备的类型/资源分配给了谁/使用的哪块卡/分配的资源
 	allocateSet map[schedulingv1alpha1.DeviceType]map[types.NamespacedName]map[int]corev1.ResourceList
 }
 
@@ -120,11 +121,13 @@ func (n *nodeDevice) resetDeviceTotal(resources map[schedulingv1alpha1.DeviceTyp
 
 // updateCacheUsed is used to update deviceUsed when there is a new pod created/deleted
 func (n *nodeDevice) updateCacheUsed(deviceAllocations apiext.DeviceAllocations, pod *corev1.Pod, add bool) {
+	// 参数1： 表示pod需要被分配的资源
 	if len(deviceAllocations) > 0 {
 		for deviceType, allocations := range deviceAllocations {
 			if !n.isValid(deviceType, pod, add) {
 				continue
 			}
+			// 更新nodeDevice中的deviceUsed的信息。
 			n.updateDeviceUsed(deviceType, allocations, add)
 			n.resetDeviceFree(deviceType)
 			n.updateAllocateSet(deviceType, allocations, pod, add)
@@ -306,7 +309,7 @@ func (n *nodeDevice) tryAllocateGPU(podRequest corev1.ResourceList, allocateResu
 	if len(nodeDeviceTotal) <= 0 {
 		return fmt.Errorf("node does not have enough GPU")
 	}
-
+    // 进行资源的转换
 	fillGPUTotalMem(nodeDeviceTotal, podRequest)
 
 	var deviceAllocations []*apiext.DeviceAllocation

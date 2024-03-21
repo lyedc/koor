@@ -215,11 +215,17 @@ func (pgMgr *PodGroupManager) PreFilter(ctx context.Context, pod *corev1.Pod) er
 			util.GetId(pod.Namespace, pod.Name))
 	}
 	// resourceSatisfied means pod will directly pass the PreFilter
+	// OnceResourceSatisfied 同样也是在addPod阶段，如果已经被调度了，那么就加入到podGroup的boundPods中
+	// func (gang *Gang) addBoundPod(pod *v1.Pod) 在这个方法中会有对已经被bound的pod的数量是否已经满足了gang的最小需求，如果满足了
+	// 就设置 OnceResourceSatisfied 为true的逻辑。所以就是判断如果已经满足了的话，就直接不在进行有关gang的过滤规则了。直接进行调度逻辑中。
 	if gang.OnceResourceSatisfied {
 		return nil
 	}
 
 	// check minNum
+	// 注意这里的判断GetChildRenNum的逻辑，这个是因为在NewPodGroupManager 的addPod的Handler中注册了inforor的逻，当一个
+	// pod产生的时候，如果是某个podGroup中的，就会通过SetChild方法把这个方法加入到PodGroup中，也就是gang中。所以才在这里判断是否满足了
+	// gang中存在的pod，是否小于了这个podGroup中最小的期望值。如果没有就不在进行下去了。等到所有的pod都加入到了期望的podGroup中
 	if gang.getChildrenNum() < gang.getGangMinNum() {
 		return fmt.Errorf("gang child pod not collect enough, gangName: %v, podName: %v", gang.Name,
 			util.GetId(pod.Namespace, pod.Name))
@@ -228,15 +234,19 @@ func (pgMgr *PodGroupManager) PreFilter(ctx context.Context, pod *corev1.Pod) er
 	// first try update the global cycle of gang
 	gang.trySetScheduleCycleValid()
 	gangScheduleCycle := gang.getScheduleCycle()
+	// 这里使用到的trySetScheduleCycleValid中的pod的调度周期是通过这里完成设置的。也就是这个值：gangScheduleCycle
 	defer gang.setChildScheduleCycle(pod, gangScheduleCycle)
 
 	gangMode := gang.getGangMode()
 	if gangMode == extension.GangModeStrict {
 		podScheduleCycle := gang.getChildScheduleCycle(pod)
+		// 在严格模式下，判断调度周期是否有效
 		if !gang.isScheduleCycleValid() {
 			return fmt.Errorf("gang scheduleCycle not valid, gangName: %v, podName: %v",
 				gang.Name, util.GetId(pod.Namespace, pod.Name))
 		}
+		// 如果pod没有被调度过，那么这里获取到的是0，如果获取到的大于这个调度周期的值，表示已经被调度过了。或者是在别人的调度周期，
+		// 那么久直接拒绝这个pod准入条件。
 		if podScheduleCycle >= gangScheduleCycle {
 			return fmt.Errorf("pod's schedule cycle too large, gangName: %v, podName: %v, podCycle: %v, gangCycle: %v",
 				gang.Name, util.GetId(pod.Namespace, pod.Name), podScheduleCycle, gangScheduleCycle)
@@ -285,6 +295,7 @@ func (pgMgr *PodGroupManager) Permit(ctx context.Context, pod *corev1.Pod) (time
 		return 0, PodGroupNotFound
 	}
 	// first add pod to the gang's WaitingPodsMap
+	// 把pod加入到gang的等待队列中。WaitingForBindChildren 队列中。
 	gang.addAssumedPod(pod)
 
 	gangGroup := gang.getGangGroup()
@@ -292,6 +303,7 @@ func (pgMgr *PodGroupManager) Permit(ctx context.Context, pod *corev1.Pod) (time
 	// check each gang group
 	for _, groupName := range gangGroup {
 		gangTmp := pgMgr.cache.getGangFromCacheByGangId(groupName, false)
+		// waitingForBindChildren中的pod的数量大于等于PodGroup中最小的pod需求，或者是OnceResourceSatisfied那么久允许批准进行绑定。
 		if gangTmp == nil || !gangTmp.isGangValidForPermit() {
 			allGangGroupAssumed = false
 			break
@@ -362,9 +374,12 @@ func (pgMgr *PodGroupManager) PostBind(ctx context.Context, pod *corev1.Pod, nod
 		return
 	}
 	// first update gang in cache
+	// 删除WaitingForBindChildren中的pod信息，把pod放入到 BoundChildren中，当BoundChildren满足了最小需求，那么就OnceResourceSatisfied
+	// 表示允许被bind了。
 	gang.addBoundPod(pod)
 
 	//  update PodGroup
+	// 下面就是更新PodGroup的状态了。。。
 	_, pg := pgMgr.GetPodGroup(pod)
 	if pg == nil {
 		return

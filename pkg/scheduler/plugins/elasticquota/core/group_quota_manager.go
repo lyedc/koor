@@ -311,36 +311,50 @@ func (gqm *GroupQuotaManager) scopedLockForQuotaInfo(quotaList []*QuotaInfo) fun
 	}
 }
 
+// UpdateQuota 用于更新或删除配额信息。
+// 如果isDelete为true，则删除指定的配额信息；
+// 如果isDelete为false，则更新指定配额的信息。
+// 参数:
+// - quota: 指定要更新或删除的配额对象。
+// - isDelete: 指示是否要删除配额，true为删除，false为更新。
+// 返回值:
+// - error: 操作过程中出现的错误，如果没有错误发生则为nil。
 func (gqm *GroupQuotaManager) UpdateQuota(quota *v1alpha1.ElasticQuota, isDelete bool) error {
-	// 确保更新过程中线程的安全。
+	// 加锁以确保更新过程的线程安全
 	gqm.hierarchyUpdateLock.Lock()
 	defer gqm.hierarchyUpdateLock.Unlock()
 
 	quotaName := quota.Name
 	if isDelete {
+		// 如果是要删除配额，首先检查该配额是否存在
 		_, exist := gqm.quotaInfoMap[quotaName]
 		if !exist {
 			return fmt.Errorf("get quota info failed, quotaName:%v", quotaName)
 		}
+		// 存在则从配额信息映射中删除该配额
 		delete(gqm.quotaInfoMap, quotaName)
 	} else {
+		// 如果不是删除操作，则创建新的配额信息
 		newQuotaInfo := NewQuotaInfoFromQuota(quota)
-		// update the local quotaInfo's crd
+		// 检查配额信息是否已存在，若存在则更新，不存在则添加
 		if localQuotaInfo, exist := gqm.quotaInfoMap[quotaName]; exist {
-			// if the quotaMeta doesn't change, only runtime/used/request change causes update,
-			// no need to call updateQuotaGroupConfigNoLock.
+			// 如果配额元数据没有变化，则仅当运行时/使用量/请求量发生变化时才进行更新
 			if !localQuotaInfo.isQuotaMetaChange(newQuotaInfo) {
 				return nil
 			}
+			// 更新本地配额信息
 			localQuotaInfo.updateQuotaInfoFromRemote(newQuotaInfo)
 		} else {
+			// 如果配额信息不存在，则直接添加到映射中
 			gqm.quotaInfoMap[quotaName] = newQuotaInfo
 		}
 	}
+	// 不管是添加还是更新配额信息，最后都需更新配额组配置
 	gqm.updateQuotaGroupConfigNoLock()
 
 	return nil
 }
+
 // 这个方法用于在 GroupQuotaManager 中更新组配额的配置，包括重新构建拓扑结构和重置配额信息，以确保管理器处于一致的状态
 func (gqm *GroupQuotaManager) updateQuotaGroupConfigNoLock() {
 	// rebuild gqm.quotaTopoNodeMap

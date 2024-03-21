@@ -268,9 +268,11 @@ func New(args runtime.Object, handle framework.Handle) (framework.Plugin, error)
 	if !ok {
 		return nil, fmt.Errorf("expect handle to be type frameworkext.ExtendedHandle, got %T", handle)
 	}
-
+    // 注册事件方法
 	deviceCache := newNodeDeviceCache()
+	// 注册device的事件方法
 	registerDeviceEventHandler(deviceCache, extendedHandle.KoordinatorSharedInformerFactory())
+	// 注册pod的事件方法。
 	registerPodEventHandler(deviceCache, handle.SharedInformerFactory())
 
 	return &Plugin{

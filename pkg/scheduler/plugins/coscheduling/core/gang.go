@@ -380,14 +380,18 @@ func (gang *Gang) trySetScheduleCycleValid() {
 	defer gang.lock.Unlock()
 
 	num := 0
+	// 每个pod的调度周期是在podGroupManager的PreFilter阶段计算的,当这个插件完成是会设置pod的调度周期。
+	// 所以调度器的调度周期的增加只会出现在，其实是变相的每个pod的调度周期是否和gang的调调度周期是一致的，如果一致，并做最终num的数量
+	// 等于了需要的pod的最小数量，或者满足了pod的需求数量的时候，才会把调度器的周期加1
 	for _, childScheduleCycle := range gang.ChildrenScheduleRoundMap {
 		if childScheduleCycle == gang.ScheduleCycle {
 			num++
 		}
 	}
-
+    // 这里的gang中的TotalChildrenNum的值来自podGroup中的minMember或者podGroup中的注解TotalChildrenNum
 	if num == gang.TotalChildrenNum {
 		gang.ScheduleCycleValid = true
+		// 如果已经达到了需要的pod数量，那么调度周期就加一
 		gang.ScheduleCycle += 1
 		klog.Infof("trySetScheduleCycleTrue, gangName: %v, ScheduleCycle: %v, ScheduleCycleValid: %v",
 			gang.Name, gang.ScheduleCycle, gang.ScheduleCycleValid)

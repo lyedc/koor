@@ -262,20 +262,29 @@ func (qi *QuotaInfo) clearForResetNoLock() {
 	qi.RuntimeVersion = 0
 }
 
+// isQuotaMetaChange 检查两个配额信息对象之间是否存在元数据变更
+//
+// 参数:
+//    quotaInfo *QuotaInfo: 指向要比较的另一个配额信息对象的指针
+//
+// 返回值:
+//    bool: 如果当前配额信息对象与传入的配额信息对象存在元数据变更，则返回 true；否则返回 false。
 func (qi *QuotaInfo) isQuotaMetaChange(quotaInfo *QuotaInfo) bool {
-	qi.lock.Lock()
+	qi.lock.Lock() // 加锁以确保对配额信息修改的并发安全
 	defer qi.lock.Unlock()
 
+	// 比较两个配额信息对象的各个字段，判断是否存在差异
 	if !quotav1.Equals(qi.CalculateInfo.Max, quotaInfo.CalculateInfo.Max) ||
 		!quotav1.Equals(qi.CalculateInfo.Min, quotaInfo.CalculateInfo.Min) ||
 		!quotav1.Equals(qi.CalculateInfo.SharedWeight, quotaInfo.CalculateInfo.SharedWeight) ||
 		qi.AllowLentResource != quotaInfo.AllowLentResource ||
 		qi.IsParent != quotaInfo.IsParent ||
 		qi.ParentName != quotaInfo.ParentName {
-		return true
+		return true // 存在差异，即元数据发生变更
 	}
-	return false
+	return false // 无差异，元数据未发生变更
 }
+
 
 func (qi *QuotaInfo) isPodExist(pod *v1.Pod) bool {
 	qi.lock.Lock()
