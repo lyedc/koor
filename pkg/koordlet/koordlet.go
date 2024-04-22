@@ -119,13 +119,13 @@ func NewDaemon(config *config.Configuration) (Daemon, error) {
 	}
 	system.SetupCgroupPathFormatter(detectCgroupDriver)
 	klog.Infof("Node %s use '%s' as cgroup driver", nodeName, string(detectCgroupDriver))
-
+    // 指标收集
 	collectorService := metricsadvisor.NewCollector(config.CollectorConf, statesInformer, metricCache)
-
+    // 资源管理服务
 	resManagerService := resmanager.NewResManager(config.ResManagerConf, scheme, kubeClient, crdClient, nodeName, statesInformer, metricCache, int64(config.CollectorConf.CollectResUsedIntervalSeconds))
-
+    // qos管理
 	qosManager := qosmanager.NewQosManager(config.QosManagerConf, scheme, kubeClient, nodeName, statesInformer, metricCache)
-
+    // runtimeHook
 	runtimeHook, err := runtimehooks.NewRuntimeHook(statesInformer, config.RuntimeHookConf)
 	if err != nil {
 		return nil, err
@@ -148,6 +148,7 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	klog.Infof("Starting daemon")
 
 	go func() {
+		// 循环删除sqllite数据库中过期的指标数据
 		if err := d.metricCache.Run(stopCh); err != nil {
 			klog.Error("Unable to run the metric cache: ", err)
 			os.Exit(1)

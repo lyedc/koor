@@ -129,6 +129,7 @@ func (m *metricCache) Run(stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 
 	go wait.Until(func() {
+		// 循环删除过期的数据,数据在1.0版本存储在sqllite中.是一个本地的数据库.
 		m.recycleDB()
 	}, time.Duration(m.config.MetricGCIntervalSeconds)*time.Second, stopCh)
 
