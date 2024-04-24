@@ -227,12 +227,21 @@ func (g *gpuDeviceManager) collectGPUUsage() {
 	processesGPUUsages := make(map[uint32][]*rawGPUMetric)
 	for deviceIndex, gpuDevice := range g.devices {
 		// 从驱动层面获取gpu的使用情况。直接调用的是nvml库。
+		/*
+		该函数用于获取当前在GPU设备上运行的计算进程的信息。函数返回两个值，
+		processesInfos是一个包含所有运行进程信息的切片，ret是一个错误码，
+		用于表示函数执行是否成功。
+		*/
 		processesInfos, ret := gpuDevice.Device.GetComputeRunningProcesses()
 		if ret != nvml.SUCCESS {
 			klog.Warningf("Unable to get process info for device at index %d: %v", deviceIndex, nvml.ErrorString(ret))
 			continue
 		}
 		// 获取进程的使用情况。
+		/*
+		该函数是用于获取GPU设备上各个进程的利用率。其中，gpuDevice是一个GPU设备对象，1024是获取利用率的时间间隔（单位：毫秒）。
+		函数返回两个值，processUtilizations是一个包含各个进程利用率的切片，ret是一个错误码，用于表示函数执行是否出错。
+		*/
 		processUtilizations, ret := gpuDevice.Device.GetProcessUtilization(1024)
 		if ret != nvml.SUCCESS {
 			klog.Warningf("Unable to get process utilization for device at index %d: %v", deviceIndex, nvml.ErrorString(ret))

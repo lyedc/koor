@@ -63,6 +63,11 @@ func readTotalCPUStat(statPath string) (uint64, error) {
 }
 
 // GetCPUStatUsageTicks returns the node's CPU usage ticks
+/*
+该函数用于获取节点的CPU使用时间。
+首先，通过system.GetProcFilePath(system.ProcStatName)获取到/proc/stat文件的路径。
+然后，调用readTotalCPUStat(statPath)函数读取并返回CPU的总使用时间
+*/
 func GetCPUStatUsageTicks() (uint64, error) {
 	statPath := system.GetProcFilePath(system.ProcStatName)
 	return readTotalCPUStat(statPath)

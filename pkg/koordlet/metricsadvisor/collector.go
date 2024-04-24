@@ -116,6 +116,7 @@ func (c *collector) Run(stopCh <-chan struct{}) error {
 	defer c.context.gpuDeviceManager.shutdown()
 	klog.Info("Starting collector for NodeMetric")
 	defer klog.Info("shutting down daemon")
+	// 默认一秒的时间间隔采集一次
 	if c.config.CollectResUsedIntervalSeconds <= 0 {
 		klog.Infof("CollectResUsedIntervalSeconds is %v, metric collector is disabled",
 			c.config.CollectResUsedIntervalSeconds)
@@ -124,17 +125,25 @@ func (c *collector) Run(stopCh <-chan struct{}) error {
 
 	go wait.Until(func() {
 		c.collectGPUUsage()
+		// 收集Node上cpu、memory、gpu资源使用情况
 		c.collectNodeResUsed()
 		// add sync statesInformer cache check before collect pod information
 		// because collect function will get all pods.
+		// statesInformer 中对crd 类型的informer 以及pod， node类型的进行了分装，本质上还是资源自己的informer
 		if !cache.WaitForCacheSync(stopCh, c.statesInformer.HasSynced) {
 			klog.Errorf("timed out waiting for states informer caches to sync")
 			// Koordlet exit because of statesInformer sync failed.
 			os.Exit(1)
 			return
 		}
+		// 收集 BestEffort 类型的podde cpu的资源情况。并存储在 BECPUResourceMetric 对象中。
 		c.collectBECPUResourceMetric()
+		// 计算所有pod的资源使用情况，cpu，memory，存储在 PodResourceMetric 对象中。
+		/*
+		currentCPUUsage  cpu的使用情况，通过读取 cpuusage 计算cpu使用的使用率，使用率/1000 可以计算出毫核
+		*/
 		c.collectPodResUsed()
+		// 通过读取： // "cpu.stat" 读取的是这个值。 计算所有的pod的cpu的限流的情况
 		c.collectPodThrottledInfo()
 	}, time.Duration(c.config.CollectResUsedIntervalSeconds)*time.Second, stopCh)
 
@@ -179,7 +188,9 @@ func (c *collector) Run(stopCh <-chan struct{}) error {
 func (c *collector) collectNodeResUsed() {
 	klog.V(6).Info("collectNodeResUsed start")
 	collectTime := time.Now()
+	// /proc/cpu 获取节点的CPU使用时间。
 	currentCPUTick, err0 := koordletutil.GetCPUStatUsageTicks()
+	// 获取/proc/meminfo中的内容，计算内存的使用量
 	memUsageValue, err1 := koordletutil.GetMemInfoUsageKB()
 	if err0 != nil || err1 != nil {
 		klog.Warningf("failed to collect node usage, CPU err: %s, Memory err: %s", err0, err1)
@@ -190,14 +201,16 @@ func (c *collector) collectNodeResUsed() {
 		cpuTick: currentCPUTick,
 		ts:      collectTime,
 	}
+	// 如果是第一次收集指标，那么久跳过对cpu的使用量的计算。记录初始值，等待下一次的采集。
 	if lastCPUStat.cpuTick <= 0 {
 		klog.V(6).Infof("ignore the first cpu stat collection")
 		return
 	}
 	// 1 jiffies could be 10ms
 	// NOTICE: do subtraction and division first to avoid overflow
+	// 根据时间差和cpu的时钟差，计算cpu的使用率。
 	cpuUsageValue := float64(currentCPUTick-lastCPUStat.cpuTick) / system.GetPeriodTicks(lastCPUStat.ts, collectTime)
-
+	// 组装nodeMetric
 	nodeMetric := metriccache.NodeResourceMetric{
 		CPUUsed: metriccache.CPUMetric{
 			// 1.0 CPU = 1000 Milli-CPU
@@ -208,15 +221,16 @@ func (c *collector) collectNodeResUsed() {
 			MemoryWithoutCache: *resource.NewQuantity(memUsageValue*1024, resource.BinarySI),
 		},
 	}
-
+	// 根据收集到的gpu的使用情况给，填充NodeMetric, gpu的情况通过collectGPUUsage 获取的值为依据。计算出来。
 	nodeMetric.GPUs = c.context.gpuDeviceManager.getNodeGPUUsage()
-
+	// 插入到本地的数据库 sqlite中。
 	if err := c.metricCache.InsertNodeResourceMetric(collectTime, &nodeMetric); err != nil {
 		klog.Errorf("insert node resource metric error: %v", err)
 	}
 
 	// update collect time
 	c.state.RefreshTime(nodeResUsedUpdateTime)
+	// cpu的使用情况记录到prometheus中,并等待采集。
 	metrics.RecordNodeUsedCPU(cpuUsageValue) // in cpu cores
 
 	klog.Infof("collectNodeResUsed finished %+v", nodeMetric)
@@ -230,8 +244,9 @@ func (c *collector) collectPodResUsed() {
 		uid := string(pod.UID) // types.UID
 		collectTime := time.Now()
 		podCgroupDir := koordletutil.GetPodCgroupDirWithKube(meta.CgroupDir)
-
+		// cpuusage 记录容器的cpu总消耗时间
 		currentCPUUsage, err0 := c.cgroupReader.ReadCPUAcctUsage(podCgroupDir)
+		// "memory.stat" 读取这个指标。
 		memStat, err1 := c.cgroupReader.ReadMemoryStat(podCgroupDir)
 		if err0 != nil || err1 != nil {
 			// higher verbosity for probably non-running pods
@@ -404,6 +419,7 @@ func (c *collector) collectPodThrottledInfo() {
 		uid := string(pod.UID) // types.UID
 		collectTime := time.Now()
 		podCgroupDir := koordletutil.GetPodCgroupDirWithKube(meta.CgroupDir)
+		// "cpu.stat" 读取的是这个值。
 		currentCPUStat, err := c.cgroupReader.ReadCPUStat(podCgroupDir)
 		if err != nil || currentCPUStat == nil {
 			if pod.Status.Phase == corev1.PodRunning {

@@ -117,6 +117,7 @@ func NewDaemon(config *config.Configuration) (Daemon, error) {
 	}); pollErr != nil {
 		return nil, fmt.Errorf("can not detect kubelet cgroup driver: %v", pollErr)
 	}
+	// 设置cgroupDriver的模式，有Cgroup和systemd两种
 	system.SetupCgroupPathFormatter(detectCgroupDriver)
 	klog.Infof("Node %s use '%s' as cgroup driver", nodeName, string(detectCgroupDriver))
     // 指标收集
@@ -169,6 +170,7 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	}
 
 	// start collector
+	// 主要是收集node节点上的资源的使用情况。
 	go func() {
 		if err := d.collector.Run(stopCh); err != nil {
 			klog.Error("Unable to run the collector: ", err)

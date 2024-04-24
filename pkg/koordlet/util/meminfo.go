@@ -119,6 +119,12 @@ func readMemInfo(path string) (*MemInfo, error) {
 }
 
 // GetMemInfoUsageKB returns the node's memory usage quantity (kB)
+/*
+该函数用于获取节点的内存使用量（以kB为单位）。具体实现过程如下：
+首先通过调用system.GetProcFilePath()函数获取/proc/meminfo文件的路径。
+然后调用readMemInfo()函数读取该文件的内容。
+如果成功读取到内容，将MemTotal减去MemAvailable得到内存使用量。
+*/
 func GetMemInfoUsageKB() (int64, error) {
 	meminfoPath := system.GetProcFilePath(system.ProcMemInfoName)
 	memInfo, err := readMemInfo(meminfoPath)
