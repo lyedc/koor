@@ -170,7 +170,13 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	}
 
 	// start collector
-	// 主要是收集node节点上的资源的使用情况。
+	/*
+	/*
+	主要实现对be类型的pod cpu， 内存的采集
+	对所有pod的cpu， 内存的采集
+	对所有pod的限流信息进行采集
+	对所有pod和container使用的gpu的信息进行采集。
+	*/
 	go func() {
 		if err := d.collector.Run(stopCh); err != nil {
 			klog.Error("Unable to run the collector: ", err)

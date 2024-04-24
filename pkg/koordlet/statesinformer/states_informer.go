@@ -142,6 +142,7 @@ func (s *statesInformer) Run(stopCh <-chan struct{}) error {
 
 	klog.V(2).Infof("starting informer plugins")
 	s.setupPlugins()
+	// 启动所有的informer
 	s.startPlugins(stopCh)
 
 	// waiting for node synced.

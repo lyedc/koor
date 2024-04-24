@@ -111,6 +111,12 @@ func (c *collector) HasSynced() bool {
 	return c.state.HasSynced()
 }
 
+/*
+主要实现对be类型的pod cpu， 内存的采集
+对所有pod的cpu， 内存的采集
+对所有pod的限流信息进行采集
+对所有pod和container使用的gpu的信息进行采集。
+*/
 func (c *collector) Run(stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer c.context.gpuDeviceManager.shutdown()
@@ -148,7 +154,7 @@ func (c *collector) Run(stopCh <-chan struct{}) error {
 	}, time.Duration(c.config.CollectResUsedIntervalSeconds)*time.Second, stopCh)
 
 	go wait.Until(c.collectNodeCPUInfo, time.Duration(c.config.CollectNodeCPUInfoIntervalSeconds)*time.Second, stopCh)
-
+    // 收集容器的压力值。通过 psi或者cpi两种方式。
 	ic := NewPerformanceCollector(c.statesInformer, c.metricCache, c.config.CPICollectorTimeWindowSeconds)
 	util.RunFeature(func() {
 		// add sync statesInformer cache check before collect pod information
@@ -177,7 +183,7 @@ func (c *collector) Run(stopCh <-chan struct{}) error {
 		ic.collectContainerPSI()
 		ic.collectPodPSI()
 	}, []featuregate.Feature{features.PSICollector}, c.config.PSICollectorIntervalSeconds, stopCh)
-
+    // 定时清理内存中的缓存
 	go wait.Until(c.cleanupContext, cleanupInterval, stopCh)
 
 	klog.Info("Starting successfully")

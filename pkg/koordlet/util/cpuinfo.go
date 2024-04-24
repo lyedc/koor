@@ -220,6 +220,14 @@ func calculateCPUTotalInfo(processorInfos []ProcessorInfo) *CPUTotalInfo {
 
 // GetLocalCPUInfo returns the local cpu info for cpuset allocation, NUMA-aware scheduling
 func GetLocalCPUInfo() (*LocalCPUInfo, error) {
+	/*
+	[root@gs-server-14090 cpu]# lscpu -e=CPU,NODE,SOCKET,CORE,CACHE,ONLINE
+	CPU NODE SOCKET CORE L1d:L1i:L2:L3 ONLINE
+	0   0    0      0    0:0:0:0       是
+	1   0    0      1    1:1:1:1       是
+	2   0    0      2    2:2:2:2       是
+	3   0    0      3    3:3:3:3       是
+	*/
 	lsCPUStr, err := lsCPU("-e=CPU,NODE,SOCKET,CORE,CACHE,ONLINE")
 	if err != nil {
 		return nil, err
