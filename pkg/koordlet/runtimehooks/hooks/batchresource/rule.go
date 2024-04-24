@@ -39,6 +39,14 @@ func (r *batchResourceRule) getEnableCFSQuota() bool {
 	return r.enableCFSQuota
 }
 
+
+/*
+
+该函数的功能是：根据获取到的CPU抑制策略（CPUSuppressPolicy），判断是否需要禁用CFS配额（cfs_quota）。
+具体来说，函数首先通过调用getCPUSuppressPolicy(mergedNodeSLO)函数获取CPU抑制策略的启用状态和策略类型。如果策略启用且类型为CPUCfsQuotaPolicy，则将enableCFSQuota设置为false。
+这段代码的目的是在批量处理Pods的情况下，如果启用了CPU抑制策略中的CFS配额策略，为了确保kubepods-besteffort的CFS配额不小于子Pods的配额，需要禁用Batch的CFS配额，从而通过Pod级别的cpu.shares和QoS级别的CFS配额来限制Batch的CPU使用量
+batch就是be类型的pod,  cfs_quota 表示的是给的cpu的配额.
+*/
 func (p *plugin) parseRule(mergedNodeSLOIf interface{}) (bool, error) {
 	mergedNodeSLO := mergedNodeSLOIf.(*slov1alpha1.NodeSLOSpec)
 
@@ -59,6 +67,7 @@ func (p *plugin) parseRule(mergedNodeSLOIf interface{}) (bool, error) {
 	return updated, nil
 }
 
+// 相当于是走了docker的 nri的功能,修改了pod的response的值.然后再发送给docker进行启动..
 func (p *plugin) ruleUpdateCb(pods []*statesinformer.PodMeta) error {
 	r := p.getRule()
 	if r == nil {
@@ -73,10 +82,12 @@ func (p *plugin) ruleUpdateCb(pods []*statesinformer.PodMeta) error {
 		// pod-level
 		podCtx := &protocol.PodContext{}
 		podCtx.FromReconciler(podMeta)
+		// 修改response红cfs_quota的配置.
 		if err := p.SetPodCFSQuota(podCtx); err != nil { // only need to change cfs quota
 			klog.V(4).Infof("failed to set pod cfs quota during callback %v, err: %v", name, err)
 			continue
 		}
+		// p.Response.Resources 对 response的值进行修改,赋值...
 		podCtx.ReconcilerDone()
 		// container-level
 		for _, containerStat := range podMeta.Pod.Status.ContainerStatuses {

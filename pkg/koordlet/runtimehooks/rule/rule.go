@@ -77,9 +77,18 @@ func find(name string) (*Rule, bool) {
 	return newRule, false
 }
 
+// 实现了 nri的功能,对pod的response进行修改.
 func UpdateRules(ruleType statesinformer.RegisterType, ruleObj interface{}, podsMeta []*statesinformer.PodMeta) {
 	klog.V(3).Infof("applying %v rules with new %v, detail: %v",
 		len(globalHookRules), ruleType.String(), util.DumpJSON(ruleObj))
+	// 这里的 globalHookRules
+	/*
+	rule 形式的register是给Rule对象中的 进行赋值,总共三个对象进行赋值..
+	parseRuleType   statesinformer.RegisterType
+	parseRuleFn     ParseRuleFn
+	callbacks       []UpdateCbFn
+	*/
+	// 例如: BatchResource 注册rule就是一个nodeslo类型的.
 	for _, r := range globalHookRules {
 		if ruleType != r.parseRuleType {
 			continue
@@ -91,6 +100,8 @@ func UpdateRules(ruleType statesinformer.RegisterType, ruleObj interface{}, pods
 		if r.parseRuleFn == nil {
 			continue
 		}
+		// 这里传入的事 nodeslo的spec, 如果是nodeslo触发的callback回调
+		// 就是根据不同的回调类型,传入不同的对象.
 		updated, err := r.parseRuleFn(ruleObj)
 		if err != nil {
 			klog.Warningf("parse rule %s from nodeSLO failed, error: %v", r.name, err)

@@ -157,6 +157,9 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	}()
 
 	// start states informer
+	/*
+	资源的informer逻辑,以及加上资源更新后对runtimehook的回调,会掉的作用是啥...
+	*/
 	go func() {
 		if err := d.statesInformer.Run(stopCh); err != nil {
 			klog.Error("Unable to run the states informer: ", err)
