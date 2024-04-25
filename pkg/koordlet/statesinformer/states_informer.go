@@ -164,6 +164,7 @@ func (s *statesInformer) Run(stopCh <-chan struct{}) error {
 	}
 
 	if features.DefaultKoordletFeatureGate.Enabled(features.Accelerators) {
+		// 上报本机的 gpu的信息.,上报的信息,会创建或者更新device 这个crd,也就是 gpu的crd的信息.
 		go wait.Until(s.reportDevice, s.config.NodeTopologySyncInterval, stopCh)
 		// check is nvml is available
 		if s.initGPU() {

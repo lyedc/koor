@@ -58,7 +58,7 @@ func (s *statesInformer) reportDevice() {
 
 	device := s.buildBasicDevice(node)
 	s.fillGPUDevice(device, gpuDevices, gpuModel, gpuDriverVer)
-
+	// 更新 Device这个CRD的信息..
 	err := s.updateDevice(device)
 	if err == nil {
 		klog.V(4).Infof("successfully update Device %s", node.Name)
@@ -68,7 +68,7 @@ func (s *statesInformer) reportDevice() {
 		klog.Errorf("Failed to updateDevice %s, err: %v", node.Name, err)
 		return
 	}
-
+   // 如果没有这个crd,就创建 device的crd,
 	err = s.createDevice(device)
 	if err == nil {
 		klog.V(4).Infof("successfully create Device %s", node.Name)

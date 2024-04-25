@@ -88,6 +88,7 @@ func (p *plugin) ruleUpdateCb(pods []*statesinformer.PodMeta) error {
 			continue
 		}
 		// p.Response.Resources 对 response的值进行修改,赋值...
+		// 通过 updater去修改底层 cgroup的值
 		podCtx.ReconcilerDone()
 		// container-level
 		for _, containerStat := range podMeta.Pod.Status.ContainerStatuses {

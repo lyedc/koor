@@ -141,6 +141,7 @@ func (p *PodContext) injectForOrigin() {
 
 func (p *PodContext) injectForExt() {
 	if p.Response.Resources.CPUBvt != nil {
+		// 这里是去更新cgroup的值.
 		if err := injectCPUBvt(p.Request.CgroupParent, *p.Response.Resources.CPUBvt); err != nil {
 			klog.Infof("set pod %v/%v bvt %v on cgroup parent %v failed, error %v", p.Request.PodMeta.Namespace,
 				p.Request.PodMeta.Name, *p.Response.Resources.CPUBvt, p.Request.CgroupParent, err)
