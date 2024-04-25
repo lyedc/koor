@@ -160,6 +160,7 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	/*
 	资源的informer逻辑,以及加上资源更新后对runtimehook的回调,会掉的作用是啥...
 	// 通过回调函数,去修底层的cgroup的值..
+	// 这里也会涉及到创gpu的device的crd信息
 	*/
 	go func() {
 		if err := d.statesInformer.Run(stopCh); err != nil {
