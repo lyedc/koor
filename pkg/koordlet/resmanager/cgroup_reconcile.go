@@ -104,6 +104,7 @@ func (m *CgroupResourcesReconcile) calculateAndUpdateResources(nodeSLO *slov1alp
 	podMetas := m.resmanager.statesInformer.GetAllPods()
 
 	// calculate qos-level, pod-level and container-level resources
+	// 返回三个级别的资源更新器，qos， pod， container
 	qosResources, podResources, containerResources := m.calculateResources(nodeSLO.Spec.ResourceQOSStrategy, node, podMetas)
 
 	// to make sure the hierarchical cgroup resources are correctly updated, we simply update the resources by
@@ -117,6 +118,7 @@ func (m *CgroupResourcesReconcile) calculateAndUpdateResources(nodeSLO *slov1alp
 func (m *CgroupResourcesReconcile) calculateResources(nodeCfg *slov1alpha1.ResourceQOSStrategy, node *corev1.Node,
 	podMetas []*statesinformer.PodMeta) (qosLevelResources, podLevelResources, containerLevelResources []resourceexecutor.ResourceUpdater) {
 	// TODO: check anolis os version
+	// 这里普通的服务器操作系统没有map中的value值，主要是计算每个不同类型的资源的内存占用情况。cgroupResourceSummary
 	qosSummary := map[corev1.PodQOSClass]*cgroupResourceSummary{
 		corev1.PodQOSGuaranteed: {},
 		corev1.PodQOSBurstable:  {},
@@ -141,9 +143,11 @@ func (m *CgroupResourcesReconcile) calculateResources(nodeCfg *slov1alpha1.Resou
 		}
 
 		// update summary for qos resources
+		// 给 qosSummary这个map的value赋值
 		updateCgroupSummaryForQoS(qosSummary[kubeQoS], pod, mergedPodCfg)
 
 		// calculate pod-level and container-level resources and make resourceUpdaters
+		// 计算pod和container级别的资源，主要是memory
 		podResources, containerResources := m.calculatePodAndContainerResources(podMeta, node, mergedPodCfg)
 		podLevelResources = append(podLevelResources, podResources...)
 		containerLevelResources = append(containerLevelResources, containerResources...)
@@ -187,7 +191,8 @@ func (m *CgroupResourcesReconcile) calculatePodAndContainerResources(podMeta *st
 	podCfg *slov1alpha1.ResourceQOS) (podResources, containerResources []resourceexecutor.ResourceUpdater) {
 	pod := podMeta.Pod
 	podDir := koordletutil.GetPodCgroupDirWithKube(podMeta.CgroupDir)
-
+	// 这里的podResource主要还是对memory的资源进行设置，并且好多参数是在centos是没有的。
+	// 这里会根据不同的cgroup类型，返回一个cgroup Updater
 	podResources = m.calculatePodResources(pod, podDir, podCfg)
 
 	for _, container := range pod.Spec.Containers {

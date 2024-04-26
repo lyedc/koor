@@ -74,7 +74,7 @@ func (c *CPUEvictor) cpuEvict() {
 		klog.Warningf("skip CPU evict process, still in evict cool time")
 		return
 	}
-
+   // be类型的pod的使用阈值
 	thresholdConfig := nodeSLO.Spec.ResourceUsedThresholdWithBE
 	windowSeconds := c.resmanager.collectResUsedIntervalSeconds * 2
 	if thresholdConfig.CPUEvictTimeWindowSeconds != nil && *thresholdConfig.CPUEvictTimeWindowSeconds > c.resmanager.collectResUsedIntervalSeconds {
@@ -97,58 +97,88 @@ func (c *CPUEvictor) cpuEvict() {
 	klog.V(5).Info("cpu evict process finished.")
 }
 
+// calculateMilliRelease 计算需要释放的CPU资源量（以毫核为单位）。
+//
+// 参数:
+// - thresholdConfig: 包含CPU驱逐策略的配置，例如CPU使用率阈值。
+// - windowSeconds: 用于计算平均CPU使用率的时间窗口（秒）。
+//
+// 返回:
+// - *metriccache.BECPUResourceMetric: 当前的BECPU资源指标，如果计算有效则返回，否则为nil。
+// - int64: 需要释放的CPU资源量（毫核），如果不需要释放则为0。
 func (c *CPUEvictor) calculateMilliRelease(thresholdConfig *slov1alpha1.ResourceThresholdStrategy, windowSeconds int64) (*metriccache.BECPUResourceMetric, int64) {
-	// Step1: Calculate release resource by BECPUResourceMetric in window
+	// 步骤1: 根据指定时间窗口内的BECPUResourceMetric计算释放的资源量
 	avgBECPUQueryResult := c.resmanager.metricCache.GetBECPUResourceMetric(generateQueryParamsAvg(windowSeconds))
 	if !isAvgQueryResultValid(avgBECPUQueryResult, windowSeconds, c.resmanager.collectResUsedIntervalSeconds) {
 		return nil, 0
 	}
 
+	// 检查平均CPU使用率是否足够高，不足以触发驱逐
 	if !isBECPUUsageHighEnough(avgBECPUQueryResult.Metric, thresholdConfig.CPUEvictBEUsageThresholdPercent) {
 		klog.Warningf("cpuEvict by ResourceSatisfaction skipped,avg cpuUsage not Enough! metric: %+v", avgBECPUQueryResult.Metric)
 		return nil, 0
 	}
 
+	// 计算基于平均CPU使用率的释放资源量
 	milliRelease := calculateResourceMilliToRelease(avgBECPUQueryResult.Metric, thresholdConfig)
 	if milliRelease <= 0 {
 		klog.Warningf("cpuEvict by ResourceSatisfaction skipped,releaseByAvg: %d", milliRelease)
 		return nil, 0
 	}
 
-	// Step2: Calculate release resource current
+	// 步骤2: 计算当前时间点的释放资源量
 	currentBECPUQueryResult := c.resmanager.metricCache.GetBECPUResourceMetric(generateQueryParamsLast(c.resmanager.collectResUsedIntervalSeconds * 2))
 	if !isQueryResultValid(currentBECPUQueryResult) {
 		return nil, 0
 	}
 
+	// 检查当前CPU使用率是否足够高，不足以触发驱逐
 	if !isBECPUUsageHighEnough(currentBECPUQueryResult.Metric, thresholdConfig.CPUEvictBEUsageThresholdPercent) {
 		klog.Warningf("cpuEvict by ResourceSatisfaction skipped,current cpuUsage not Enough! metric: %+v", currentBECPUQueryResult.Metric)
 		return nil, 0
 	}
 
+	// 计算基于当前CPU使用率的释放资源量
 	milliReleaseByCurrent := calculateResourceMilliToRelease(currentBECPUQueryResult.Metric, thresholdConfig)
 	if milliReleaseByCurrent <= 0 {
 		klog.Warningf("cpuEvict by ResourceSatisfaction skipped,releaseByCurrent: %d", milliReleaseByCurrent)
 		return nil, 0
 	}
 
-	// Step3：release = min(releaseByAvg,releaseByCurrent)
+	// 步骤3: 释放资源量取平均和当前计算结果中的较小值
 	if milliReleaseByCurrent < milliRelease {
 		milliRelease = milliReleaseByCurrent
 	}
 	return currentBECPUQueryResult.Metric, milliRelease
 }
 
+
+// evictByResourceSatisfaction 根据资源满足度条件执行驱逐操作。
+// 此函数检查给定节点上的资源满足度配置是否有效，并根据配置计算出需要释放的CPU资源量。
+// 如果计算出需要释放CPU资源，则按照特定策略排序选择要驱逐的Pod，并执行驱逐操作。
+//
+// 参数:
+// - node: 指定要进行驱逐操作的节点。
+// - thresholdConfig: 资源阈值策略配置，包含触发驱逐的资源满足度条件。
+// - windowSeconds: 用于计算资源使用率的时间窗口长度（秒）。
+//
+// 无返回值。
 func (c *CPUEvictor) evictByResourceSatisfaction(node *corev1.Node, thresholdConfig *slov1alpha1.ResourceThresholdStrategy, windowSeconds int64) {
+	// 验证资源满足度配置是否有效，无效则直接返回。
 	if !isSatisfactionConfigValid(thresholdConfig) {
 		return
 	}
+
+	// 根据配置和时间窗口计算当前需要释放的CPU资源量（毫核）。
 	currentBECPU, milliRelease := c.calculateMilliRelease(thresholdConfig, windowSeconds)
 	if milliRelease > 0 {
+		// 获取并排序满足条件的Pod信息，准备进行驱逐。
 		bePodInfos := c.getPodEvictInfoAndSort(currentBECPU)
+		// 执行驱逐操作，释放计算出的CPU资源量。
 		c.killAndEvictBEPodsRelease(node, bePodInfos, milliRelease)
 	}
 }
+
 
 func (c *CPUEvictor) killAndEvictBEPodsRelease(node *corev1.Node, bePodInfos []*podEvictCPUInfo, cpuNeedMilliRelease int64) {
 	message := fmt.Sprintf("killAndEvictBEPodsRelease for node(%s), need realase CPU : %d", c.resmanager.nodeName, cpuNeedMilliRelease)

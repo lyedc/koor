@@ -49,13 +49,14 @@ func generateQueryParam() *metriccache.QueryParam {
 
 func (s *statesInformer) reportDevice() {
 	node := s.GetNode()
+	// 通过查询本地的sqlliete数据库获取collertor模块中上报的device使用的信息。
 	gpuDevices := s.buildGPUDevice()
 	if len(gpuDevices) == 0 {
 		return
 	}
 
 	gpuModel, gpuDriverVer := s.getGPUDriverAndModelFunc()
-
+    // 填充device crd的值。
 	device := s.buildBasicDevice(node)
 	s.fillGPUDevice(device, gpuDevices, gpuModel, gpuDriverVer)
 	// 更新 Device这个CRD的信息..

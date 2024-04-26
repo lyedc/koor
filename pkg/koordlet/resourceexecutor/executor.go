@@ -117,7 +117,12 @@ func (e *ResourceUpdateExecutorImpl) LeveledUpdateBatch(cacheable bool, updaters
 			if !e.needUpdate(updater) {
 				continue
 			}
+/*
+   该结构体实现了MergeableResourceUpdater接口，该接口用于执行资源的合并更新操作。对于一些特定的资源接口（如cpuset.cpus和memory.min），从上到下的和解操作应该保持上层值大于下层值。因此，实现了一个分层的更新器，具体步骤如下：
+   按cgroup接口（即cgroup文件名）将cgroup资源批量更新。
+   按照层次结构的顺序更新每个cgroup资源：首先从上到下通过合并新值和旧值来更新资源；然后使用新值从下到上更新资源。
 
+*/
 			mergedUpdater, err := updater.MergeUpdate()
 			if err != nil && sysutil.IsResourceUnsupportedErr(err) {
 				klog.V(5).Infof("failed merge update unsupported resource %s, err: %v", updater.Key(), err)
@@ -154,6 +159,7 @@ func (e *ResourceUpdateExecutorImpl) LeveledUpdateBatch(cacheable bool, updaters
 				klog.V(6).Infof("skip update resource %s since it should skip the merge", updater.Key())
 				continue
 			}
+			// 去更新底层的cgroup的资源。
 			err = updater.Update()
 			if err != nil && sysutil.IsResourceUnsupportedErr(err) {
 				klog.V(5).Infof("failed update unsupported resource %s, err: %v", updater.Key(), err)
