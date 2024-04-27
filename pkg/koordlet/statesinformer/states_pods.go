@@ -99,6 +99,15 @@ func (s *podsInformer) Start(stopCh <-chan struct{}) {
 		klog.Fatalf("create kubelet stub, %v", err)
 	}
 	s.kubelet = stub
+	/*
+	func (r PodLifeCycleHandlerFuncs) OnPodAdded(podID string) {
+		if r.PodAddedFunc != nil {
+			r.PodAddedFunc(podID)
+		}
+	}
+
+	*/
+	// 这里的事件注册到了 PodLifeCycleHandlerFuncs
 	hdlID := s.pleg.AddHandler(pleg.PodLifeCycleHandlerFuncs{
 		PodAddedFunc: func(podID string) {
 			// There is no need to notify to update the data when the channel is not empty
@@ -112,7 +121,10 @@ func (s *podsInformer) Start(stopCh <-chan struct{}) {
 		},
 	})
 	defer s.pleg.RemoverHandler(hdlID)
-
+    // 这里的syncKubeletLoop 函数，每隔 60s 就会去获取一次 kubelet 的 pods
+    // 或者是当 pod的 PodLifeCycleHandlerFuncs 事件触发。触发一次，就网channel中发一个信号。
+    // 所以这里的方法总共有两种触发方式1. 通过pleg watch cgrop中的文件触发event，最后触发 2. 通过定时任务触发。
+    // syncpod 函数最后又会去触发 reconcilier。中注册的回调函数。
 	go s.syncKubeletLoop(s.config.KubeletSyncInterval, stopCh)
 	go func() {
 		if err := s.pleg.Run(stopCh); err != nil {
@@ -158,12 +170,14 @@ func (s *podsInformer) syncPods() error {
 		}
 		newPodMap[string(pod.UID)] = podMeta
 		// record pod container metrics
+		// 记录pod中的资源指标，并上报到prometheus
 		recordPodResourceMetrics(podMeta)
 	}
 	s.podMap = newPodMap
 	s.podHasSynced.Store(true)
 	s.podUpdatedTime = time.Now()
 	klog.Infof("get pods success, len %d, time %s", len(s.podMap), s.podUpdatedTime.String())
+	// 触发回调函数
 	s.callbackRunner.SendCallback(RegisterTypeAllPods)
 	return nil
 }
@@ -176,6 +190,8 @@ func (s *podsInformer) syncKubeletLoop(duration time.Duration, stopCh <-chan str
 	rateLimiter := rate.NewLimiter(5, 10)
 	for {
 		select {
+		// 这里的channel是通过 pleg的runEventHandler触发的。
+			// 然后channel在这里被赋值： PodAddedFunc
 		case <-s.podCreated:
 			if rateLimiter.Allow() {
 				// sync kubelet triggered immediately when the Pod is created

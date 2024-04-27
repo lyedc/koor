@@ -135,6 +135,7 @@ func (r *resmanager) Run(stopCh <-chan struct{}) error {
 
 	cpuSuppress := NewCPUSuppress(r)
 	// 计算能压制的be类型的pod的cpu资源。
+	// 计算节点上 Best Effort（BE）类型 Pod 被抑制使用的 CPU 资源，也就是计算be类型最大能使用的cpu set的值，然后更新cgroup的值。
 	util.RunFeature(cpuSuppress.suppressBECPU, []featuregate.Feature{features.BECPUSuppress}, r.config.CPUSuppressIntervalSeconds, stopCh)
 
 	cpuBurst := NewCPUBurst(r)

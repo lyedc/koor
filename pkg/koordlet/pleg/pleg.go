@@ -158,11 +158,12 @@ func (p *pleg) Run(stopCh <-chan struct{}) error {
 			}
 		}()
 	}
-
+	// 当events 中有值，才会处理时间。
 	go p.runEventHandler(stopCh)
 
 	for {
 		select {
+		// 文件有变动就触发事件。
 		case evt := <-p.podWatcher.Event():
 			switch TypeOf(evt) {
 			case DirCreated:
@@ -172,7 +173,7 @@ func (p *pleg) Run(stopCh <-chan struct{}) error {
 					klog.Infof("skip %v added event which is not a pod", evt.Name)
 					continue
 				}
-				// handle Pod event
+				// handle Pod event  在这个方法中进行处理： go p.runEventHandler(stopCh)
 				p.events <- newPodEvent(podID, podAdded)
 				// register watcher for containers
 				p.containerWatcher.AddWatch(evt.Name)
@@ -234,6 +235,8 @@ func (p *pleg) Run(stopCh <-chan struct{}) error {
 func (p *pleg) runEventHandler(stopCh <-chan struct{}) {
 	for {
 		select {
+		// 当pod，或者continer的watch有事件的时候，就会触发这个流程。
+			// 然后这里的handler事件，是在states_pod 中注入的事件
 		case evt := <-p.events:
 			klog.V(5).Infof("receive pleg event %v", evt)
 			p.handleEvent(evt)
@@ -254,6 +257,7 @@ func (p *pleg) handleEvent(event *event) {
 		klog.V(5).Infof("run pleg handler with event %v", event)
 		switch event.eventType {
 		case podAdded:
+			// 触发在states_pod文件中通过 s.pleg.AddHandler(pleg.PodLifeCycleHandlerFuncs注入的方法。
 			hdl.OnPodAdded(event.podID)
 		case podDeleted:
 			hdl.OnPodDeleted(event.podID)
