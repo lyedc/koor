@@ -47,6 +47,23 @@ var koordinatorPlugins = map[string]frameworkruntime.PluginFactory{
 	// 按照node的numa拓扑进行调度。
 	nodenumaresource.Name: nodenumaresource.New,
 	// 资源预留调度，具体是怎么调度的，怎么生成了一个未知的pod，然后绑定到node上面，并且不展示资源。
+	/*
+	找这个函数的流程，这个函数会声场一个虚拟的pod，然后进行处理。。
+	、、ReservationToPodEventHandlerFuncs
+	func (r ReservationToPodEventHandlerFuncs) OnAdd(obj interface{}) {
+		reservation, ok := obj.(*schedulingv1alpha1.Reservation)
+		if !ok {
+			return
+		}
+		if !r.FilterFunc(reservation) {
+			return
+		}
+
+		pod := NewReservePod(reservation)
+		r.PodHandler.OnAdd(pod)
+	}
+
+	*/
 	reservation.Name: reservation.New,
 	/*
 		// 把pod的request替换为 batch类型的资源进行计算以及调度
