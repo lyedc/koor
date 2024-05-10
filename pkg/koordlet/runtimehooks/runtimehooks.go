@@ -80,6 +80,7 @@ func NewRuntimeHook(si statesinformer.StatesInformer, cfg *Config) (RuntimeHook,
 		server:         s,
 		reconciler:     reconciler.NewReconciler(si),
 	}
+	//  reconciler是对koordlet 内部 Pod 生命周期的 Hook
 	// 是往: globalHookRules 中注册了runtimehook中国年hook点.例如:batch_resource 注册的PreRunPodSandbox点的方法是:.SetPodResources 方法.
 	registerPlugins()
 	si.RegisterCallbacks(statesinformer.RegisterTypeNodeSLOSpec, "runtime-hooks-rule-node-slo",
