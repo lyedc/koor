@@ -77,6 +77,14 @@ func validateCommonDeviceRequest(podRequest corev1.ResourceList, deviceType sche
 // ValidateGPURequest uses binary to store each request status.
 // For example, 00010 stands for koordinator.sh/gpu exists, and vice versa.
 // only 00001 || 00010 || 10100 || 01100 are valid GPU request combination
+// ValidateGPURequest 校验 GPU 请求的有效性。
+// 此函数使用二进制位来存储每个请求的状态，例如，00010 表示 koordinator.sh/gpu 存在，反之亦然。
+// 只有 00001 || 00010 || 10100 || 01100 是有效的 GPU 请求组合。
+// 参数:
+// - podRequest corev1.ResourceList: Pod 的资源请求列表。
+// 返回值:
+// - uint: 表示 GPU 请求状态的二进制位组合。
+// - error: 如果请求无效，则返回错误信息
 var ValidateGPURequest = func(podRequest corev1.ResourceList) (uint, error) {
 	var gpuCombination uint
 
@@ -87,6 +95,7 @@ var ValidateGPURequest = func(podRequest corev1.ResourceList) (uint, error) {
 	if _, exist := podRequest[apiext.NvidiaGPU]; exist {
 		gpuCombination |= NvidiaGPUExist
 	}
+	// 校验 koordinator GPU 的值是否有效
 	if koordGPU, exist := podRequest[apiext.KoordGPU]; exist {
 		if koordGPU.Value() > 100 && koordGPU.Value()%100 != 0 {
 			return gpuCombination, fmt.Errorf("failed to validate %v: %v", apiext.KoordGPU, koordGPU.Value())
@@ -94,6 +103,7 @@ var ValidateGPURequest = func(podRequest corev1.ResourceList) (uint, error) {
 		gpuCombination |= KoordGPUExist
 	}
 	if gpuCore, exist := podRequest[apiext.GPUCore]; exist {
+		// 校验 GPU 核心数的值是否有效
 		// koordinator.sh/gpu-core should be something like: 25, 50, 75, 100, 200, 300
 		if gpuCore.Value() > 100 && gpuCore.Value()%100 != 0 {
 			return gpuCombination, fmt.Errorf("failed to validate %v: %v", apiext.GPUCore, gpuCore.Value())

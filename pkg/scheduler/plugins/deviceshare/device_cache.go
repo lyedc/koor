@@ -303,8 +303,16 @@ func (n *nodeDevice) tryAllocateCommonDevice(podRequest corev1.ResourceList, dev
 	return fmt.Errorf("node does not have enough %v", deviceType)
 }
 
+/*
+gpu的表型形式。
+// deviceResources is used to present resources per device.
+// we use the minor of device as key
+// "0": {koordinator.sh/gpu-core:100, koordinator.sh/gpu-memory-ratio:100, koordinator.sh/gpu-memory: 16GB}
+// "1": {koordinator.sh/gpu-core:100, koordinator.sh/gpu-memory-ratio:100, koordinator.sh/gpu-memory: 16GB}
+*/
 func (n *nodeDevice) tryAllocateGPU(podRequest corev1.ResourceList, allocateResult apiext.DeviceAllocations) error {
 	podRequest = quotav1.Mask(podRequest, DeviceResourceNames[schedulingv1alpha1.GPU])
+	// nodeDevice的信息是通过infromer过来试试更新的。所以不用想device plugin 那样每次都要调用plugin去咨询是否可以被分配到资源。
 	nodeDeviceTotal := n.deviceTotal[schedulingv1alpha1.GPU]
 	if len(nodeDeviceTotal) <= 0 {
 		return fmt.Errorf("node does not have enough GPU")
@@ -313,6 +321,7 @@ func (n *nodeDevice) tryAllocateGPU(podRequest corev1.ResourceList, allocateResu
 	fillGPUTotalMem(nodeDeviceTotal, podRequest)
 
 	var deviceAllocations []*apiext.DeviceAllocation
+	// 验证是否是需要整课的GPU
 	if isMultipleGPUPod(podRequest) {
 		gpuCore, gpuMem, gpuMemRatio := podRequest[apiext.GPUCore], podRequest[apiext.GPUMemory], podRequest[apiext.GPUMemoryRatio]
 		gpuWanted := gpuCore.Value() / 100
