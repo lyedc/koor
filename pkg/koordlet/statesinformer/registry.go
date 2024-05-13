@@ -18,10 +18,15 @@ package statesinformer
 
 func (s *statesInformer) initInformerPlugins() {
 	s.states.informerPlugins = map[pluginName]informerPlugin{
+		// 根据crd中slo的策略，更新pod的cgroup的值。
 		nodeSLOInformerName:    NewNodeSLOInformer(),
+		// 计算或者更新node的 cpu topology资源，
 		nodeTopoInformerName:   NewNodeTopoInformer(),
+		// 收集节点的be类型的Allocatable资源指标，上报prometheus
 		nodeInformerName:       NewNodeInformer(),
+		// 获取节点上所有的pod信息，并抽取pod的资源指标，上报prometheus,并在本地缓存pod的信息
 		podsInformerName:       NewPodsInformer(),
+		// 从本地db中获取 nodeMetric，然后上报更新到crd，供调度器使用。
 		nodeMetricInformerName: NewNodeMetricInformer(),
 	}
 }

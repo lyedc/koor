@@ -152,6 +152,7 @@ func (g *Plugin) Start() {
 }
 
 func (g *Plugin) NewControllers() ([]frameworkext.Controller, error) {
+	// 这里定义了两个时间间隔，DelayEvictTime 持续多久used超过runtime就驱逐pod， RevokePodInterval：多久执行一次检测的行为。
 	quotaOverUsedRevokeController := NewQuotaOverUsedRevokeController(g.handle.ClientSet(), g.pluginArgs.DelayEvictTime.Duration,
 		g.pluginArgs.RevokePodInterval.Duration, g.groupQuotaManager, *g.pluginArgs.MonitorAllQuotas)
 	elasticQuotaController := NewElasticQuotaController(g.client, g.quotaLister, g.groupQuotaManager)

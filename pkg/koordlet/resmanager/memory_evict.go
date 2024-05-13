@@ -122,7 +122,7 @@ func (m *MemoryEvictor) memoryEvict() {
 		float64(*thresholdPercent)/100,
 		float64(lowerPercent)/100,
 	)
-
+	// 计算需要释放的内存大小
 	memoryNeedRelease := memoryCapacity * (nodeMemoryUsage - lowerPercent) / 100
 	m.killAndEvictBEPods(node, podMetrics, memoryNeedRelease)
 }

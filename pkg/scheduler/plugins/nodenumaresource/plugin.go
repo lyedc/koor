@@ -249,7 +249,7 @@ func (p *Plugin) Filter(ctx context.Context, cycleState *framework.CycleState, p
 	if node == nil {
 		return framework.NewStatus(framework.Error, "node not found")
 	}
-
+	// 通过informer 获取koordlet上报的拓扑关系。
 	cpuTopologyOptions := p.topologyManager.GetCPUTopologyOptions(node.Name)
 	if cpuTopologyOptions.CPUTopology == nil {
 		return framework.NewStatus(framework.UnschedulableAndUnresolvable, ErrNotFoundCPUTopology)

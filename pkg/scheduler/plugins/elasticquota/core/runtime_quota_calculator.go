@@ -100,14 +100,17 @@ func (qt *quotaTree) redistribution(totalResource int64) {
 	toPartitionResource := totalResource
 	totalSharedWeight := int64(0)
 	needAdjustQuotaNodes := make([]*quotaNode, 0)
+	// 这里包含了所有的quota的信息。也就是通过这个计算，可以计算出每个quota中runtime的信息。
 	for _, node := range qt.quotaNodes {
 		if node.request > node.min {
 			// if a node's request > autoScaleMin, the node needs adjustQuota
 			// the node's runtime is autoScaleMin
+			// 这里表示需要借用资源的quota列表
 			needAdjustQuotaNodes = append(needAdjustQuotaNodes, node)
 			totalSharedWeight += node.sharedWeight
 			node.runtimeQuota = node.min
 		} else {
+			// 如果node是否愿意借出资源，如果愿意那么runtimeQuota就是request
 			if node.allowLentResource {
 				node.runtimeQuota = node.request
 			} else {
@@ -118,7 +121,7 @@ func (qt *quotaTree) redistribution(totalResource int64) {
 		}
 		toPartitionResource -= node.runtimeQuota
 	}
-
+    // 剩余的总资源按照权重拆分给需要借用资源的quota列表
 	if toPartitionResource > 0 {
 		qt.iterationForRedistribution(toPartitionResource, totalSharedWeight, needAdjustQuotaNodes)
 	}
@@ -144,7 +147,7 @@ func (qt *quotaTree) iterationForRedistribution(totalRes, totalSharedWeight int6
 			node.runtimeQuota = node.request
 		}
 	}
-
+    // 经过上面的计算还有quota需要借用资源的话，就递归拆借资源。
 	if toPartitionResource > 0 && len(needAdjustQuotaNodes) > 0 {
 		qt.iterationForRedistribution(toPartitionResource, needAdjustTotalSharedWeight, needAdjustQuotaNodes)
 	}
@@ -383,11 +386,12 @@ func (qtw *RuntimeQuotaCalculator) updateOneGroupRuntimeQuota(quotaInfo *QuotaIn
 	if quotaInfo.RuntimeVersion == qtw.globalRuntimeVersion {
 		return
 	}
-
+    // 计算runtime的值。
 	qtw.calculateRuntimeNoLock()
 
 	for resKey := range qtw.resourceKeys {
 		if exist, quotaNode := qtw.quotaTree[resKey].find(quotaInfo.Name); exist {
+			// 这只quotaInfo的runtime的值。
 			quotaInfo.CalculateInfo.Runtime[resKey] = createQuantity(quotaNode.runtimeQuota, resKey)
 		}
 	}

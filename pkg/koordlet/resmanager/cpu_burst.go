@@ -178,93 +178,106 @@ func (b *CPUBurst) init(stopCh <-chan struct{}) error {
 	return nil
 }
 
+// start 函数启动 CPU 突发策略，包括重置与 Pod 和容器相关的指标，并将突发配置应用到符合条件的 Pod 上。
 func (b *CPUBurst) start() {
 	klog.V(5).Infof("start cpu burst strategy")
-	// at the beginning of appling cpu burst strategy, we should reset all metrics belongs to pods and containers
+	// 在应用 CPU 突发策略之初，重置所有与 Pod 和容器相关的指标。
 	metrics.ResetCPUBurstCollector()
-	// sync config from node slo
+
+	// 从节点的 SLO 中尝试同步 CPU 突发策略配置。
+	// slo中配置了burst的策略。
 	nodeSLO := b.resmanager.getNodeSLOCopy()
 	if nodeSLO == nil || nodeSLO.Spec.CPUBurstStrategy == nil {
 		klog.Warningf("cpu burst strategy config is nil, %+v", nodeSLO)
 		return
 	}
 	b.nodeCPUBurstStrategy = nodeSLO.Spec.CPUBurstStrategy
+
+	// 获取系统中所有 Pod 的元数据。
 	podsMeta := b.resmanager.statesInformer.GetAllPods()
 
-	// get node state by node share pool usage
+	// 根据节点共享池使用率确定当前节点状态。超载，正常，闲置
 	nodeState := b.getNodeStateForBurst(*b.nodeCPUBurstStrategy.SharePoolThresholdPercent, podsMeta)
 	klog.V(5).Infof("get node state %v for cpu burst", nodeState)
 
+	// 遍历每个 Pod 元数据，对符合条件的 Pod 应用 CPU 突发配置。
 	for _, podMeta := range podsMeta {
 		if podMeta == nil || podMeta.Pod == nil {
 			klog.Warningf("podMeta is illegal, detail %v", podMeta)
 			continue
 		}
-		if !util.IsPodCPUBurstable(podMeta.Pod) {
-			// ignore non-burstable pod, e.g. LSR, BE pods
-			continue
-		}
-		if podMeta.Pod.Status.Phase != corev1.PodPending && podMeta.Pod.Status.Phase != corev1.PodRunning {
-			// ignore pods that status.phase is not pending or running,
-			// because the other pods(include succeed,failed and unknown) do not have any containers running
-			// and therefore do not have a cgroup file,
-			// so there is no need to deal with it
+
+		// 跳过非突发型 Pod 以及不在 pending 或 running 状态的 Pod。
+		// lsr, lse, be 类型的都会被跳过。
+		if !util.IsPodCPUBurstable(podMeta.Pod) || podMeta.Pod.Status.Phase != corev1.PodPending && podMeta.Pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
 
-		// merge burst config from pod and node
+		// 为 Pod 生成并验证突发配置，同时合并节点的突发配置。用node的作为默认的配置，如果pod有设置的话，用pod自己的
+		// 这里的设置是在pod的annotation里设置的，所以这里需要验证下
 		cpuBurstCfg := genPodBurstConfig(podMeta.Pod, &b.nodeCPUBurstStrategy.CPUBurstConfig)
 		if cpuBurstCfg == nil {
 			klog.Warningf("pod %v/%v burst config illegal, burst config %v",
 				podMeta.Pod.Namespace, podMeta.Pod.Name, cpuBurstCfg)
 			continue
 		}
+
+		// 将 CPU 突发配置应用到 Pod 及其容器上。
 		klog.V(5).Infof("get pod %v/%v cpu burst config: %v", podMeta.Pod.Namespace, podMeta.Pod.Name, cpuBurstCfg)
-		// set cpu.cfs_burst_us for pod and containers
+		// // set cpu.cfs_burst_us for containers
 		b.applyCPUBurst(cpuBurstCfg, podMeta)
-		// scale cpu.cfs_quota_us for pod and containers
+		// 同时，根据节点状态调整 Pod 及其容器的 CPU CFS 配额。
+		// // scale cpu.cfs_quota_us for pod/containers by container throttled state and node state
 		b.applyCFSQuotaBurst(cpuBurstCfg, podMeta, nodeState)
 	}
+	// 清理并回收突发策略使用的所有资源或数据结构。
 	b.Recycle()
 }
 
-// getNodeStateForBurst checks whether node share pool cpu usage beyonds the threshold
-// return isOverload, share pool usage ratio and message detail
+
+// getNodeStateForBurst 检查节点的共享池CPU使用是否超过阈值
+// 返回是否超载、共享池使用率和消息详情
 func (b *CPUBurst) getNodeStateForBurst(sharePoolThresholdPercent int64,
 	podsMeta []*statesinformer.PodMeta) nodeStateForBurst {
+	// 计算 overload 指标持续时间，取重置间隔的 5 倍或 10 秒中较小值
 	overloadMetricDurationSeconds := util.MinInt64(int64(b.resmanager.config.ReconcileIntervalSeconds*5), 10)
+	// 生成查询参数
 	queryParam := generateQueryParamsAvg(overloadMetricDurationSeconds)
+	// 收集节点和Pod的指标数据
 	nodeMetric, podsMetric := b.resmanager.collectNodeAndPodMetrics(queryParam)
 	if nodeMetric == nil {
 		klog.Warningf("node metric is nil during handle cfs burst scale down")
 		return nodeBurstUnknown
 	}
+	// 获取节点CPU信息
 	nodeCPUInfo, err := b.resmanager.metricCache.GetNodeCPUInfo(&metriccache.QueryParam{})
 	if err != nil || nodeCPUInfo == nil {
 		klog.Warningf("get node cpu info failed, detail %v, error %v", nodeCPUInfo, err)
 		return nodeBurstUnknown
 	}
 
+	// 初始化Pod指标映射
 	podMetricMap := make(map[string]*metriccache.PodResourceMetric)
 	for _, podMetric := range podsMetric {
 		podMetricMap[podMetric.PodUID] = podMetric
 	}
 
+	// 计算节点总CPU核数和当前使用率
 	nodeCPUCoresTotal := len(nodeCPUInfo.ProcessorInfos)
 	nodeCPUCoresUsage := float64(nodeMetric.CPUUsed.CPUUsed.MilliValue()) / 1000
 
-	// calculate cpu share pool info; for conservative reason, include system usage in share pool
+	// 计算共享池CPU信息，出于保守考虑，将系统使用率包含在共享池中
 	sharePoolCPUCoresTotal := float64(nodeCPUCoresTotal)
 	sharePoolCPUCoresUsage := nodeCPUCoresUsage
 	for _, podMeta := range podsMeta {
 		podQOS := apiext.GetPodQoSClass(podMeta.Pod)
-		// exclude LSR pod cpu from cpu share pool
+		// 排除 LSR 容器的CPU配额从共享池中
 		if podQOS == apiext.QoSLSR {
 			podRequest := util.GetPodRequest(podMeta.Pod)
 			sharePoolCPUCoresTotal -= float64(podRequest.Cpu().MilliValue()) / 1000
 		}
 
-		// exclude LSR and BE pod cpu usage from cpu share pool
+		// 排除 LSR 和 BE 容器的CPU使用率从共享池中
 		podMetric, exist := podMetricMap[string(podMeta.Pod.UID)]
 		if !exist || podMetric == nil {
 			continue
@@ -272,9 +285,9 @@ func (b *CPUBurst) getNodeStateForBurst(sharePoolThresholdPercent int64,
 		if podQOS == apiext.QoSLSR || podQOS == apiext.QoSBE {
 			sharePoolCPUCoresUsage -= float64(podMetric.CPUUsed.CPUUsed.MilliValue()) / 1000
 		}
-	} // end for podsMeta
+	}
 
-	// calculate cpu share pool usage ratio
+	// 计算共享池CPU使用率比例
 	sharePoolThresholdRatio := float64(sharePoolThresholdPercent) / 100
 	sharePoolCoolingRatio := sharePoolThresholdRatio * sharePoolCoolingThresholdRatio
 	sharePoolUsageRatio := 1.0
@@ -284,7 +297,7 @@ func (b *CPUBurst) getNodeStateForBurst(sharePoolThresholdPercent int64,
 	klog.V(5).Infof("share pool usage / share pool total = [%v/%v] = [%v],  threshold = [%v]",
 		sharePoolCPUCoresUsage, sharePoolCPUCoresTotal, sharePoolUsageRatio, sharePoolThresholdRatio)
 
-	// generate node burst state by cpu share pool usage
+	// 根据共享池CPU使用率确定节点爆发状态
 	var nodeBurstState nodeStateForBurst
 	if sharePoolUsageRatio >= sharePoolThresholdRatio {
 		nodeBurstState = nodeBurstOverload
@@ -295,6 +308,7 @@ func (b *CPUBurst) getNodeStateForBurst(sharePoolThresholdPercent int64,
 	}
 	return nodeBurstState
 }
+
 
 // scale cpu.cfs_quota_us for pod/containers by container throttled state and node state
 func (b *CPUBurst) applyCFSQuotaBurst(burstCfg *slov1alpha1.CPUBurstConfig, podMeta *statesinformer.PodMeta,

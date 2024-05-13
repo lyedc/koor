@@ -128,20 +128,27 @@ func (r *resmanager) Run(stopCh <-chan struct{}) error {
 	}
 
 	cgroupResourceReconcile := NewCgroupResourcesReconcile(r)
+	// 这里最终还是会使用 CgroupResourceUpdater for updating known cgroup resources  cgroup的update去更新cgroup的值
+	// 主要是按照不同的维度去更新 cgroup的资源，qos，pod, container,内容比较晦涩。
 	util.RunFeatureWithInit(func() error { return cgroupResourceReconcile.RunInit(stopCh) }, cgroupResourceReconcile.reconcile,
 		[]featuregate.Feature{features.CgroupReconcile}, r.config.ReconcileIntervalSeconds, stopCh)
 
 	cpuSuppress := NewCPUSuppress(r)
+	// 计算能压制的be类型的pod的cpu资源。
+	// 计算节点上 Best Effort（BE）类型 Pod 被抑制使用的 CPU 资源，也就是计算be类型最大能使用的cpu set的值，然后更新cgroup的值。
 	util.RunFeature(cpuSuppress.suppressBECPU, []featuregate.Feature{features.BECPUSuppress}, r.config.CPUSuppressIntervalSeconds, stopCh)
 
 	cpuBurst := NewCPUBurst(r)
+	// 根据node的状态，设置pod的cpuburst参数，如果pod的annotation中设置了cpuburst，则使用pod的
 	util.RunFeatureWithInit(func() error { return cpuBurst.init(stopCh) }, cpuBurst.start,
 		[]featuregate.Feature{features.CPUBurst}, r.config.ReconcileIntervalSeconds, stopCh)
 
 	cpuEvictor := NewCPUEvictor(r)
+	// 根据设定的阈值，计算cpu资源的使用情况，如果超过了阈值，则kill掉一部分pod，这部分pod是be类型的pod，并且会按照优先级，或者资源使用率的大小来kill
 	util.RunFeature(cpuEvictor.cpuEvict, []featuregate.Feature{features.BECPUEvict}, r.config.CPUEvictIntervalSeconds, stopCh)
 
 	memoryEvictor := NewMemoryEvictor(r)
+	// 根据设定的阈值，计算memory资源的使用情况，如果超过了阈值，则kill掉一部分pod
 	util.RunFeature(memoryEvictor.memoryEvict, []featuregate.Feature{features.BEMemoryEvict}, r.config.MemoryEvictIntervalSeconds, stopCh)
 
 	rdtResCtrl := NewResctrlReconcile(r)

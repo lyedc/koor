@@ -38,7 +38,11 @@ func (s *server) PreRunPodSandboxHook(ctx context.Context,
 	}
 	podCtx := &protocol.PodContext{}
 	podCtx.FromProxy(req)
+	// 设置response中资源的值。
 	hooks.RunHooks(rmconfig.PreRunPodSandbox, podCtx)
+	// 给resp进行赋值，也就是把一些参数追加给resp，然后传递给后面的containerd
+	// 既然后传递给我了contained了，为啥还要在这里更新下cgroup的值呢？这里更新的是父级别的cgroup
+
 	podCtx.ProxyDone(resp)
 	klog.V(5).Infof("send PreRunPodSandboxHook for pod %v response %v", req.PodMeta.String(), resp.String())
 	return resp, nil

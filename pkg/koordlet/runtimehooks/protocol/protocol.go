@@ -106,6 +106,9 @@ func injectMemoryLimit(cgroupParent string, memoryLimit int64) error {
 
 func injectCPUBvt(cgroupParent string, bvtValue int64) error {
 	bvtValueStr := strconv.FormatInt(bvtValue, 10)
+	// new 出来一个updater,然后去修改cgroup的值, cgroup的类型是: sysutil.CPUBVTWarpNsName
+	// DefaultCgroupUpdaterFactory: 会把所有支持的cgroup类型的updater都放到一个map里,然后根据cgroup类型去获取对应的updater
+	// 然后直接去修改底层的cgroup的值.
 	updater, err := resourceexecutor.DefaultCgroupUpdaterFactory.New(sysutil.CPUBVTWarpNsName, cgroupParent, bvtValueStr)
 	if err != nil {
 		return err

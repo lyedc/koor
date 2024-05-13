@@ -183,6 +183,7 @@ func (r *nodeMetricInformer) Start(stopCh <-chan struct{}) {
 	klog.Info("shutting down nodeMetricInformer daemon")
 }
 
+// 从缓存中，或者本地数据库中获取nodeMetric,然后更新到crd中，供调度器在调度的时候使用。
 func (r *nodeMetricInformer) syncNodeMetricWorker(stopCh <-chan struct{}) {
 	reportInterval := r.getNodeMetricReportInterval()
 	for {

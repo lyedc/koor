@@ -18,6 +18,11 @@ package batchresource
 
 import (
 	"fmt"
+	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/hooks"
+	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/reconciler"
+	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/rule"
+	"github.com/koordinator-sh/koordinator/pkg/koordlet/statesinformer"
+	rmconfig "github.com/koordinator-sh/koordinator/pkg/runtimeproxy/config"
 	"sync"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -25,13 +30,8 @@ import (
 	"k8s.io/utils/pointer"
 
 	apiext "github.com/koordinator-sh/koordinator/apis/extension"
-	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/hooks"
 	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/protocol"
-	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/reconciler"
-	"github.com/koordinator-sh/koordinator/pkg/koordlet/runtimehooks/rule"
-	"github.com/koordinator-sh/koordinator/pkg/koordlet/statesinformer"
 	sysutil "github.com/koordinator-sh/koordinator/pkg/koordlet/util/system"
-	rmconfig "github.com/koordinator-sh/koordinator/pkg/runtimeproxy/config"
 	"github.com/koordinator-sh/koordinator/pkg/util"
 )
 
@@ -49,12 +49,27 @@ var podQOSConditions = []string{string(apiext.QoSBE), string(apiext.QoSLS), stri
 
 func (p *plugin) Register() {
 	klog.V(5).Infof("register hook %v", name)
+
+	// 这里注册是statesinformer 根据slo去修改cgroup时候，需要的修改规则。。。用在statesinformer的callback中。
 	rule.Register(name, description,
 		rule.WithParseFunc(statesinformer.RegisterTypeNodeSLOSpec, p.parseRule),
 		rule.WithUpdateCallback(p.ruleUpdateCb))
+
+	// 这里注册的是runtimeproxy 调用的hook点，是在每个容器的生命周期中进行处理
+	// 通过在service中执行： RunHooks。例如下面的在runPodSanbox阶段调用注册的hooks点
+	/*
+	func (s *server) PreRunPodSandboxHook(ctx context.Context,
+		req *runtimeapi.PodSandboxHookRequest) (*runtimeapi.PodSandboxHookResponse, error) {
+		hooks.RunHooks(rmconfig.PreRunPodSandbox, podCtx)
+	}
+
+	*/
 	hooks.Register(rmconfig.PreRunPodSandbox, name, description+" (pod)", p.SetPodResources)
 	hooks.Register(rmconfig.PreCreateContainer, name, description+" (container)", p.SetContainerResources)
 	hooks.Register(rmconfig.PreUpdateContainerResources, name, description+" (container)", p.SetContainerResources)
+
+	// 这些的回调是在 koorlet内部进行处理的。
+	//  syncPod后会调用触发这些回调函数。。 syncPod是通过定时任务和 watch cgroup(通过 pleg进行触发的。) 文件触发的
 	reconciler.RegisterCgroupReconciler(reconciler.PodLevel, sysutil.CPUShares, description+" (pod cpu shares)",
 		p.SetPodCPUShares, reconciler.PodQOSFilter(), podQOSConditions...)
 	reconciler.RegisterCgroupReconciler(reconciler.PodLevel, sysutil.CPUCFSQuota, description+" (pod cfs quota)",

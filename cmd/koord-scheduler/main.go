@@ -44,9 +44,26 @@ import (
 var koordinatorPlugins = map[string]frameworkruntime.PluginFactory{
 	//按照koordlet上报的资源，以及node节点的资源限制进行调度过滤。
 	loadaware.Name: loadaware.New,
-	// 按照node的numa拓扑进行调度。
+	// 按照node的numa拓扑进行调度。koordlet上报的numa信息，koordlet上报的numa信息到crd，更新到本地缓存
 	nodenumaresource.Name: nodenumaresource.New,
 	// 资源预留调度，具体是怎么调度的，怎么生成了一个未知的pod，然后绑定到node上面，并且不展示资源。
+	/*
+	找这个函数的流程，这个函数会声场一个虚拟的pod，然后进行处理。。
+	、、ReservationToPodEventHandlerFuncs
+	func (r ReservationToPodEventHandlerFuncs) OnAdd(obj interface{}) {
+		reservation, ok := obj.(*schedulingv1alpha1.Reservation)
+		if !ok {
+			return
+		}
+		if !r.FilterFunc(reservation) {
+			return
+		}
+
+		pod := NewReservePod(reservation)
+		r.PodHandler.OnAdd(pod)
+	}
+
+	*/
 	reservation.Name: reservation.New,
 	/*
 		// 把pod的request替换为 batch类型的资源进行计算以及调度
@@ -67,7 +84,8 @@ var koordinatorPlugins = map[string]frameworkruntime.PluginFactory{
 	batchresource.Name: batchresource.New,
 	// GangScheduling调度,也就是podGroup的调度
 	coscheduling.Name: coscheduling.New,
-	//gpu调度
+	//gpu调度，通过koordlet上报gpu信息到crd，调度器通过information获取gpu信息，在本地缓存中判断是否可以被调度
+	// 这样不用调用device plugin插件去判断
 	deviceshare.Name: deviceshare.New,
 	// 弹性配额调度 Elastic Quota
 	elasticquota.Name:                elasticquota.New,
@@ -80,6 +98,7 @@ var schedulingHooks = []frameworkext.SchedulingPhaseHook{
 	reservation.NewHook(),
 }
 
+// 这里会注册后台运行的 controller，例如监控 quota资源使用情况的controller: NewQuotaOverUsedRevokeController
 func flatten(plugins map[string]frameworkruntime.PluginFactory) []app.Option {
 	options := make([]app.Option, 0, len(plugins))
 	for name, factoryFn := range plugins {

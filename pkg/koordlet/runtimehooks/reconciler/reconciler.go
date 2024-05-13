@@ -209,6 +209,7 @@ func NewReconciler(s statesinformer.StatesInformer) Reconciler {
 		podUpdated: make(chan struct{}, 1),
 	}
 	// TODO register individual pod event
+	// 这个回调函数是在 podsInformer 中的 syncPods方法后进行回调
 	s.RegisterCallbacks(statesinformer.RegisterTypeAllPods, "runtime-hooks-reconciler",
 		"Reconcile cgroup files if pod updated", r.podRefreshCallback)
 	return r

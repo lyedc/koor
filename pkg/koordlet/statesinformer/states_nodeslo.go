@@ -42,7 +42,7 @@ type nodeSLOInformer struct {
 	nodeSLOInformer cache.SharedIndexInformer
 	nodeSLORWMutex  sync.RWMutex
 	nodeSLO         *slov1alpha1.NodeSLO
-
+	// callbackRunner 是一个全局的 callbackRunner，由NewCallbackRunner() 这个方法返回的
 	callbackRunner *callbackRunner
 }
 
@@ -80,9 +80,12 @@ func (s *nodeSLOInformer) Setup(ctx *pluginOption, state *pluginState) {
 				return
 			}
 			klog.Infof("update NodeSLO spec %v", util.DumpJSON(newNodeSLO.Spec))
+			// 更新informer结构体中的slo的配置.nodeSLOInformer这个对象
+			// 相当于是在koordiantor中进行了缓存...
 			s.updateNodeSLOSpec(newNodeSLO)
 		},
 	})
+	// 这里的Runner事:  NewCallbackRunner() 这个方法返回的
 	s.callbackRunner = state.callbackRunner
 }
 
@@ -111,7 +114,7 @@ func (s *nodeSLOInformer) setNodeSLOSpec(nodeSLO *slov1alpha1.NodeSLO) {
 	defer s.nodeSLORWMutex.Unlock()
 
 	oldNodeSLOStr := util.DumpJSON(s.nodeSLO)
-
+	// 通过informer的到的资源,更新struct中的对应的值.
 	if s.nodeSLO == nil {
 		s.nodeSLO = nodeSLO.DeepCopy()
 	} else {
@@ -132,6 +135,8 @@ func (s *nodeSLOInformer) mergeNodeSLOSpec(nodeSLO *slov1alpha1.NodeSLO) {
 	}
 
 	// merge ResourceUsedThresholdWithBE individually for nil-ResourceUsedThresholdWithBE case
+	// 用新的覆盖配置文件中的.
+	// 这个函数的作用是将默认配置与节点的自定义配置进行合并，生成一个新的合并后的配置
 	mergedResourceUsedThresholdWithBESpec := mergeSLOSpecResourceUsedThresholdWithBE(util.DefaultNodeSLOSpecConfig().ResourceUsedThresholdWithBE,
 		nodeSLO.Spec.ResourceUsedThresholdWithBE)
 	if mergedResourceUsedThresholdWithBESpec != nil {
@@ -218,6 +223,13 @@ func mergeSLOSpecCPUBurstStrategy(defaultSpec,
 }
 
 // mergeNoneResourceQOSIfDisabled complete ResourceQOSStrategy according to enable statuses of qos features
+/*
+该函数根据QoS功能的启用状态，完成对ResourceQOSStrategy的补充。具体分为以下几点：
+调用mergeNoneCPUQOSIfDisabled函数，补充CPU QoS相关策略。
+调用mergeNoneResctrlQOSIfDisabled函数，补充Resctrl QoS相关策略。
+调用mergeNoneMemoryQOSIfDisabled函数，补充Memory QoS相关策略。
+使用klog.V(5).Infof记录日志，输出合并后的节点ResourceQOS信息。
+*/
 func mergeNoneResourceQOSIfDisabled(resourceQOS *slov1alpha1.ResourceQOSStrategy) {
 	mergeNoneCPUQOSIfDisabled(resourceQOS)
 	mergeNoneResctrlQOSIfDisabled(resourceQOS)

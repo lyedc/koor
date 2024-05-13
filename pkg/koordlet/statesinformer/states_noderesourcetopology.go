@@ -109,6 +109,7 @@ func (s *nodeTopoInformer) Start(stopCh <-chan struct{}) {
 		klog.Fatalf("create kubelet stub, %v", err)
 	}
 	s.kubelet = stub
+	// 计算并上报node节点的numatopo信息
 	go wait.Until(s.reportNodeTopology, s.config.NodeTopologySyncInterval, stopCh)
 	klog.V(2).Infof("node topo informer started")
 }

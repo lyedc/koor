@@ -108,6 +108,7 @@ func NewStatesInformer(config *Config, kubeClient clientset.Interface, crdClient
 	stat := &pluginState{
 		metricCache:     metricsCache,
 		informerPlugins: map[pluginName]informerPlugin{},
+		//todo: 每个插件只要send一次callback,就会触发一次runtimehook中注册的方法的会掉,目前还不知道这个回调的作用.
 		callbackRunner:  NewCallbackRunner(),
 	}
 	s := &statesInformer{
@@ -121,6 +122,15 @@ func NewStatesInformer(config *Config, kubeClient clientset.Interface, crdClient
 		started: atomic.NewBool(false),
 	}
 	s.getGPUDriverAndModelFunc = s.getGPUDriverAndModel
+	/*
+	设置的下面的这些informer
+	nodeSLOInformerName:    NewNodeSLOInformer(),
+	nodeTopoInformerName:   NewNodeTopoInformer(),
+	nodeInformerName:       NewNodeInformer(),
+	podsInformerName:       NewPodsInformer(),
+	nodeMetricInformerName
+
+	*/
 	s.initInformerPlugins()
 	return s
 }
@@ -141,6 +151,7 @@ func (s *statesInformer) Run(stopCh <-chan struct{}) error {
 	go s.states.callbackRunner.Start(stopCh)
 
 	klog.V(2).Infof("starting informer plugins")
+	// 设置每个inforer的 Handler等操作.
 	s.setupPlugins()
 	// 启动所有的informer
 	s.startPlugins(stopCh)
@@ -153,6 +164,7 @@ func (s *statesInformer) Run(stopCh <-chan struct{}) error {
 	}
 
 	if features.DefaultKoordletFeatureGate.Enabled(features.Accelerators) {
+		// 上报本机的 gpu的信息.,上报的信息,会创建或者更新device 这个crd,也就是 gpu的crd的信息.
 		go wait.Until(s.reportDevice, s.config.NodeTopologySyncInterval, stopCh)
 		// check is nvml is available
 		if s.initGPU() {

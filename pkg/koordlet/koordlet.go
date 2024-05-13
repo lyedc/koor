@@ -157,6 +157,11 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	}()
 
 	// start states informer
+	/*
+	资源的informer逻辑,以及加上资源更新后对runtimehook的回调,会掉的作用是啥...
+	// 通过回调函数,去修底层的cgroup的值..
+	// 这里也会涉及到创gpu的device的crd信息
+	*/
 	go func() {
 		if err := d.statesInformer.Run(stopCh); err != nil {
 			klog.Error("Unable to run the states informer: ", err)
@@ -191,6 +196,16 @@ func (d *daemon) Run(stopCh <-chan struct{}) {
 	}
 
 	// start resmanager
+	/*
+	核心:是进行资源管理.例如:根据策略底层修改cgroup
+	1. 计算node节点上能使用的batch资源
+	2. 针对cpu的压制
+	3. 针对memory的压制.就是驱逐batch的pod
+	循环计算node节点上的资源，设置be类型能使用的最大的cpu set的值，
+	并计算cpu和memory的压力值，进行驱逐be类型的pod，保证node节点的稳定性
+	suppress(BE) := node.Total * SLOPercent - pod(LS).Used - system.Used
+
+	*/
 	go func() {
 		if err := d.resManager.Run(stopCh); err != nil {
 			klog.Error("Unable to run the resManager: ", err)

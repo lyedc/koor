@@ -105,20 +105,35 @@ func (r *CPUSuppress) writeBECgroupsCPUSet(paths []string, cpusetStr string, isR
 	r.executor.UpdateBatch(true, updaters...)
 }
 
-// calculateBESuppressCPU calculates the quantity of cpuset cpus for suppressing be pods
+// calculateBESuppressCPU 计算用于压制 BE 类型 Pod 的 cpuset CPU 资源量。
+// 该函数负责计算节点上 Best Effort（BE）类型 Pod 可能被抑制使用的 CPU 资源，
+// 以确保节点上的 CPU 资源在给定阈值内优先服务于非 BE 类型的 Pod。
+
+// 参数：
+// - node: 指向 corev1.Node 对象的指针，表示要进行 CPU 抑制计算的目标节点。
+// - nodeMetric: 指向 NodeResourceMetric 对象的指针，包含节点的资源使用度量数据。
+// - podMetrics: 一个 []*metriccache.PodResourceMetric 对象切片，表示节点上各 Pod 的 CPU 使用度量数据。
+// - podMetas: 一个 []*statesinformer.PodMeta 对象切片，提供节点上运行的各 Pod 元数据信息。
+// - beCPUUsedThreshold: 整数，表示 CPU 使用率超过该阈值时将触发 BE Pod 的 CPU 抑制（以百分比形式）。
+
+// 返回值：
+// - 一个指向 resource.Quantity 对象的指针，表示计算得出的可从 BE Pod 压制的 CPU 资源量。
 func (r *CPUSuppress) calculateBESuppressCPU(node *corev1.Node, nodeMetric *metriccache.NodeResourceMetric,
 	podMetrics []*metriccache.PodResourceMetric, podMetas []*statesinformer.PodMeta, beCPUUsedThreshold int64) *resource.Quantity {
-	// node, nodeMetric, podMetric should not be nil
-	nodeUsedCPU := &nodeMetric.CPUUsed.CPUUsed
 
+	// 初始化节点已用 CPU 量以及 BE 和 Low Priority（LS）Pod 已用 CPU 量。
+	nodeUsedCPU := &nodeMetric.CPUUsed.CPUUsed
 	podAllUsedCPU := *resource.NewMilliQuantity(0, resource.DecimalSI)
+	// 这个是计算排除be类型，以及besteffort类型的pod的cpu使用量,也就是和部分是不能被压制的。
 	podLSUsedCPU := *resource.NewMilliQuantity(0, resource.DecimalSI)
 
+	// 创建一个以 Pod UID 为键的映射，以便快速查找 Pod 元数据。
 	podMetaMap := map[string]*statesinformer.PodMeta{}
 	for _, podMeta := range podMetas {
 		podMetaMap[string(podMeta.Pod.UID)] = podMeta
 	}
 
+	// 统计所有 Pod 的 CPU 使用量并按 BE 和 Low Priority 类别分类。
 	for _, podMetric := range podMetrics {
 		podAllUsedCPU.Add(*getPodMetricCPUUsage(podMetric))
 
@@ -127,31 +142,36 @@ func (r *CPUSuppress) calculateBESuppressCPU(node *corev1.Node, nodeMetric *metr
 			klog.Warningf("podMetric not included in the podMetas %v", podMetric.PodUID)
 		}
 		if !ok || (apiext.GetPodQoSClass(podMeta.Pod) != apiext.QoSBE && util.GetKubeQosClass(podMeta.Pod) != corev1.PodQOSBestEffort) {
-			// NOTE: consider non-BE pods and podMeta-missing pods as LS
 			podLSUsedCPU.Add(*getPodMetricCPUUsage(podMetric))
 		}
 	}
 
+	// 计算系统 CPU 使用量，即节点总 CPU 使用量减去所有 Pod 的总 CPU 使用量。
 	systemUsedCPU := nodeUsedCPU.DeepCopy()
 	systemUsedCPU.Sub(podAllUsedCPU)
 	if systemUsedCPU.Value() < 0 {
-		// set systemUsedCPU always no less than 0
+		// 确保系统 CPU 使用量不为负。
 		systemUsedCPU = *resource.NewMilliQuantity(0, resource.DecimalSI)
 	}
 
-	// suppress(BE) := node.Total * SLOPercent - pod(LS).Used - system.Used
-	// NOTE: valid milli-cpu values should not larger than 2^20, so there is no overflow during the calculation
+	// 根据指定阈值计算可从 BE Pod 压制的 CPU 资源量。
+	// 这是通过从节点总 CPU 容量（调整了阈值）中减去 Low Priority Pod 的 CPU 使用量和系统的 CPU 使用量来实现的。
 	nodeBESuppressCPU := resource.NewMilliQuantity(node.Status.Allocatable.Cpu().MilliValue()*beCPUUsedThreshold/100,
 		node.Status.Allocatable.Cpu().Format)
 	nodeBESuppressCPU.Sub(podLSUsedCPU)
 	nodeBESuppressCPU.Sub(systemUsedCPU)
+
+	// 记录 Low Priority Pod 使用的 CPU 量，用于监控目的。
 	metrics.RecordBESuppressLSUsedCPU(float64(podLSUsedCPU.MilliValue()) / 1000)
-	klog.Infof("nodeSuppressBE[CPU(Core)]:%v = node.Total:%v * SLOPercent:%v%% - systemUsage:%v - podLSUsed:%v\n",
+
+	// 记录计算结果以供调试。
+	klog.Infof("nodeSuppressBE[CPU(核)]:%v = node.Total:%v * SLOPercent:%v%% - systemUsage:%v - podLSUsed:%v\n",
 		nodeBESuppressCPU.Value(), node.Status.Allocatable.Cpu().Value(), beCPUUsedThreshold, systemUsedCPU.Value(),
 		podLSUsedCPU.Value())
 
 	return nodeBESuppressCPU
 }
+
 
 func (r *CPUSuppress) applyBESuppressCPUSet(beCPUSet []int32, oldCPUSet []int32) error {
 	nodeTopo := r.resmanager.statesInformer.GetNodeTopo()
@@ -266,7 +286,11 @@ func (r *CPUSuppress) suppressBECPU() {
 			nodeMetric, podMetrics)
 		return
 	}
-
+	/*
+	   // calculateBESuppressCPU 计算用于压制 BE 类型 Pod 的 cpuset CPU 资源量。
+	   // 该函数负责计算节点上 Best Effort（BE）类型 Pod 可能被抑制使用的 CPU 资源，
+	   // 以确保节点上的 CPU 资源在给定阈值内优先服务于非 BE 类型的 Pod。
+	*/
 	suppressCPUQuantity := r.calculateBESuppressCPU(node, nodeMetric, podMetrics, podMetas,
 		*nodeSLO.Spec.ResourceUsedThresholdWithBE.CPUSuppressThresholdPercent)
 
@@ -277,6 +301,7 @@ func (r *CPUSuppress) suppressBECPU() {
 		return
 	}
 	if nodeSLO.Spec.ResourceUsedThresholdWithBE.CPUSuppressPolicy == slov1alpha1.CPUCfsQuotaPolicy {
+		// 修改PodQOSBestEffort类型的pod的 cpu.cfs_quota_us的值
 		r.adjustByCfsQuota(suppressCPUQuantity, node)
 		r.suppressPolicyStatuses[string(slov1alpha1.CPUCfsQuotaPolicy)] = policyUsing
 		r.recoverCPUSetIfNeed(koordletutil.ContainerCgroupPathRelativeDepth)
@@ -360,54 +385,71 @@ func (r *CPUSuppress) adjustByCPUSet(cpusetQuantity *resource.Quantity, nodeCPUI
 	klog.Infof("suppressBECPU finished, suppress be cpu successfully: current cpuset %v", beCPUSet)
 }
 
+// recoverCPUSetIfNeed 恢复Best Effort类型的Pod的CPU资源设置。
+// 此函数检查并更新CPU资源分配，确保LSE（低延迟扩展）Pod之外的Pod能够公平地获取CPU资源。
+// 参数 maxDepth 指定了cgroup的最大深度，用于定位需要更新的cgroup路径。
 func (r *CPUSuppress) recoverCPUSetIfNeed(maxDepth int) {
-	var cpus []int
-	nodeInfo, err := r.resmanager.metricCache.GetNodeCPUInfo(&metriccache.QueryParam{})
-	if err != nil {
-		return
-	}
-	for _, p := range nodeInfo.ProcessorInfos {
-		cpus = append(cpus, int(p.CPUID))
-	}
+    // 初始化CPU集合，用于存储系统中的所有CPU ID
+    var cpus []int
+    // 获取节点的CPU信息
+    nodeInfo, err := r.resmanager.metricCache.GetNodeCPUInfo(&metriccache.QueryParam{})
+    if err != nil {
+        return
+    }
+    // 从节点信息中提取CPU ID，并存入cpu集合中
+    for _, p := range nodeInfo.ProcessorInfos {
+        cpus = append(cpus, int(p.CPUID))
+    }
 
-	beCPUSet := cpuset.NewCPUSet(cpus...)
-	lseCPUID := make(map[int]bool)
-	podMetas := r.resmanager.statesInformer.GetAllPods()
-	for _, podMeta := range podMetas {
-		alloc, err := apiext.GetResourceStatus(podMeta.Pod.Annotations)
-		if err != nil {
-			continue
-		}
-		if apiext.GetPodQoSClass(podMeta.Pod) != apiext.QoSLSE {
-			continue
-		}
-		if alloc.CPUSet == "" {
-			continue
-		}
-		set, err := cpuset.Parse(alloc.CPUSet)
-		if err != nil {
-			klog.Errorf("failed to parse cpuset info of pod %s, err: %v", podMeta.Pod.Name, err)
-			continue
-		}
-		for _, cpuID := range set.ToSliceNoSort() {
-			lseCPUID[cpuID] = true
-		}
-	}
-	beCPUSet.Filter(func(ID int) bool {
-		return !lseCPUID[ID]
-	})
+    // 创建一个新的CPU集合，包含所有可用的CPU ID
+    beCPUSet := cpuset.NewCPUSet(cpus...)
+    // 初始化一个映射，用于记录被LSE Pod占用的CPU ID
+    lseCPUID := make(map[int]bool)
+    // 获取集群中所有Pod的信息
+    podMetas := r.resmanager.statesInformer.GetAllPods()
+    // 遍历所有Pod，筛选出LSE Pod，并收集其占用的CPU ID
+    for _, podMeta := range podMetas {
+        alloc, err := apiext.GetResourceStatus(podMeta.Pod.Annotations)
+        if err != nil {
+            continue
+        }
+        if apiext.GetPodQoSClass(podMeta.Pod) != apiext.QoSLSE {
+            continue
+        }
+        if alloc.CPUSet == "" {
+            continue
+        }
+        set, err := cpuset.Parse(alloc.CPUSet)
+        if err != nil {
+            klog.Errorf("failed to parse cpuset info of pod %s, err: %v", podMeta.Pod.Name, err)
+            continue
+        }
+        // 将LSE Pod占用的CPU ID记录到lseCPUID映射中
+        for _, cpuID := range set.ToSliceNoSort() {
+            lseCPUID[cpuID] = true
+        }
+    }
+    // 从beCPUSet中移除被LSE Pod占用的CPU ID，确保这些CPU资源可以被其他Pod使用
+    beCPUSet.Filter(func(ID int) bool {
+        return !lseCPUID[ID]
+    })
 
-	cpusetCgroupPaths, err := koordletutil.GetBECPUSetPathsByMaxDepth(maxDepth)
-	if err != nil {
-		klog.Warningf("recover bestEffort cpuset failed, get be cgroup cpuset paths  err: %s", err)
-		return
-	}
+    // 获取cgroup路径
+    cpusetCgroupPaths, err := koordletutil.GetBECPUSetPathsByMaxDepth(maxDepth)
+    if err != nil {
+        klog.Warningf("recover bestEffort cpuset failed, get be cgroup cpuset paths  err: %s", err)
+        return
+    }
 
-	cpusetStr := beCPUSet.String()
-	klog.V(6).Infof("recover bestEffort cpuset, cpuset %v", cpusetStr)
-	r.writeBECgroupsCPUSet(cpusetCgroupPaths, cpusetStr, false)
-	r.suppressPolicyStatuses[string(slov1alpha1.CPUSetPolicy)] = policyRecovered
+    // 将更新后的CPU集合转换为字符串
+    cpusetStr := beCPUSet.String()
+    klog.V(6).Infof("recover bestEffort cpuset, cpuset %v", cpusetStr)
+    // 将更新后的CPU集合写入到相关cgroup中，以应用新的CPU资源限制
+    r.writeBECgroupsCPUSet(cpusetCgroupPaths, cpusetStr, false)
+    // 更新CPU抑制策略的状态为已恢复
+    r.suppressPolicyStatuses[string(slov1alpha1.CPUSetPolicy)] = policyRecovered
 }
+
 
 func (r *CPUSuppress) adjustByCfsQuota(cpuQuantity *resource.Quantity, node *corev1.Node) {
 	newBeQuota := cpuQuantity.MilliValue() * cfsPeriod / 1000

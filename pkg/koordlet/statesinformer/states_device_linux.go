@@ -49,16 +49,17 @@ func generateQueryParam() *metriccache.QueryParam {
 
 func (s *statesInformer) reportDevice() {
 	node := s.GetNode()
+	// 通过查询本地的sqlliete数据库获取collertor模块中上报的device使用的信息。
 	gpuDevices := s.buildGPUDevice()
 	if len(gpuDevices) == 0 {
 		return
 	}
 
 	gpuModel, gpuDriverVer := s.getGPUDriverAndModelFunc()
-
+    // 填充device crd的值。
 	device := s.buildBasicDevice(node)
 	s.fillGPUDevice(device, gpuDevices, gpuModel, gpuDriverVer)
-
+	// 更新 Device这个CRD的信息..
 	err := s.updateDevice(device)
 	if err == nil {
 		klog.V(4).Infof("successfully update Device %s", node.Name)
@@ -68,7 +69,7 @@ func (s *statesInformer) reportDevice() {
 		klog.Errorf("Failed to updateDevice %s, err: %v", node.Name, err)
 		return
 	}
-
+   // 如果没有这个crd,就创建 device的crd,
 	err = s.createDevice(device)
 	if err == nil {
 		klog.V(4).Infof("successfully create Device %s", node.Name)
