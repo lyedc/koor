@@ -22,6 +22,9 @@ import (
 	"github.com/koordinator-sh/koordinator/pkg/descheduler/framework"
 )
 
+// 目前有(cs *Coscheduling) NewControllers()
+// (g *Plugin) NewControllers() ([]frameworkext.Controller, error)
+// 实现了这两个方法，后续如果有需要后台任务运行的controller的话，可以继续实现这个方法。
 type ControllerProvider interface {
 	NewControllers() ([]Controller, error)
 }
@@ -53,6 +56,7 @@ func (cm *ControllersMap) RegisterControllers(plugin framework.Plugin) {
 	}
 
 	pluginControllers = make(map[string]Controller)
+	// 这里是具体的插件的具体注册实现例如 quota，podGroup等
 	if controllers, err := controllerProvider.NewControllers(); err == nil {
 		for _, controller := range controllers {
 			if _, exist := pluginControllers[controller.Name()]; exist {
@@ -66,6 +70,7 @@ func (cm *ControllersMap) RegisterControllers(plugin framework.Plugin) {
 	}
 }
 
+// 启动注册的controller的逻辑。
 func (cm *ControllersMap) Start() {
 	for _, plugin := range cm.controllers {
 		for _, controller := range plugin {

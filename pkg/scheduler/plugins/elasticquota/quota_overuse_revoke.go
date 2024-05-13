@@ -57,7 +57,8 @@ func NewQuotaOverUsedGroupMonitor(quotaName string, manager *core.GroupQuotaMana
 		lastUnderUsedTime:            time.Now(),
 	}
 }
-
+// monitor检查配额使用情况，如果当前配额使用量超过了其运行时配额量，
+// 并且这种状态持续时间超过了预设的触发驱逐的阈值，则返回true，表示需要触发驱逐机制。
 func (monitor *QuotaOverUsedGroupMonitor) monitor() bool {
 	quotaInfo := monitor.groupQuotaManger.GetQuotaInfoByName(monitor.quotaName)
 	if quotaInfo == nil {
@@ -66,18 +67,19 @@ func (monitor *QuotaOverUsedGroupMonitor) monitor() bool {
 
 	runtime := quotaInfo.GetRuntime()
 	used := quotaInfo.GetUsed()
-
+	// 检查当前使用量是否小于等于运行时配额量，并获取超出的维度
 	isLessEqual, exceedDimensions := quotav1.LessThanOrEqual(used, runtime)
 
 	var overUseContinueDuration time.Duration
 	if !isLessEqual {
+		// 如果当前使用量大于运行时配额量，则计算持续过度使用的时间
 		overUseContinueDuration = time.Since(monitor.lastUnderUsedTime)
 		klog.V(5).Infof("Quota used is large than runtime, quotaName:%v, resDimensions:%v, used:%v, "+
 			"runtime:%v", monitor.quotaName, exceedDimensions, used, runtime)
 	} else {
 		monitor.lastUnderUsedTime = time.Now()
 	}
-
+	//如果持续过度使用的时长超过了触发驱逐的阈值
 	if overUseContinueDuration > monitor.overUsedTriggerEvictDuration {
 		klog.V(5).Infof("Quota used continue large than runtime, prepare trigger evict, quotaName:%v,"+
 			"overUseContinueDuration:%v, config:%v", monitor.quotaName, overUseContinueDuration,
@@ -88,6 +90,7 @@ func (monitor *QuotaOverUsedGroupMonitor) monitor() bool {
 	return false
 }
 
+// 这里会多次的尝试回收pod
 func (monitor *QuotaOverUsedGroupMonitor) getToRevokePodList(quotaName string) []*v1.Pod {
 	quotaInfo := monitor.groupQuotaManger.GetQuotaInfoByName(quotaName)
 	if quotaInfo == nil {
@@ -99,23 +102,31 @@ func (monitor *QuotaOverUsedGroupMonitor) getToRevokePodList(quotaName string) [
 	oriUsed := used.DeepCopy()
 
 	// order pod from low priority -> high priority
+	// 获取所有已经被调度的pod这个是存在quota的cache中的。
 	priPodCache := quotaInfo.GetPodThatIsAssigned()
-
+    // 按照优先级排序，没有优先级的按照启动时间
 	sort.Slice(priPodCache, func(i, j int) bool { return !util.MoreImportantPod(priPodCache[i], priPodCache[j]) })
 
 	// first try revoke all until used <= runtime
+	// 尝试回收Pod，直到配额使用量不超过运行时限制
 	tryAssignBackPodCache := make([]*v1.Pod, 0)
 
 	for _, pod := range priPodCache {
+		// 判断runtime和userd的谁打，如果runtime的大，那么久表示还有资源可以分配，跳过。
+		// 如果使用量已经不超过运行时限制，则停止回收过程
 		if shouldBreak, _ := quotav1.LessThanOrEqual(used, runtime); shouldBreak {
 			break
 		}
+		// 如果已经超过了runtime，那么就加入到要回收的pod中。
 		podReq, _ := resource.PodRequestsAndLimits(pod)
+		// 从use中减去要回收的pod的资源。然后继续循环，直到used的资源小于runtime。
 		used = quotav1.Subtract(used, podReq)
 		tryAssignBackPodCache = append(tryAssignBackPodCache, pod)
 	}
 
 	// means should evict all
+	// 遍历一遍后如果还是超过runtime，那么就返回要回收的pod。
+	// 如果遍历完所有Pod后，使用量仍超过运行时限制，则准备回收所有超过部分的Pod
 	if lessThanOrEqual, _ := quotav1.LessThanOrEqual(used, runtime); !lessThanOrEqual {
 		for _, pod := range tryAssignBackPodCache {
 			klog.Infof("pod should be revoked by QuotaOverUsedMonitor, pod:%v, quotaName:%v"+
@@ -125,6 +136,7 @@ func (monitor *QuotaOverUsedGroupMonitor) getToRevokePodList(quotaName string) [
 	}
 
 	//try assign back from high->low
+	//从高优先级向低优先级尝试将资源分配回已回收的Pod，直到再次超过运行时限制
 	realRevokePodCache := make([]*v1.Pod, 0)
 	for index := len(tryAssignBackPodCache) - 1; index >= 0; index-- {
 		pod := tryAssignBackPodCache[index]
@@ -174,8 +186,11 @@ func (controller *QuotaOverUsedRevokeController) Start() {
 	klog.Infof("start elasticQuota QuotaOverUsedRevokeController")
 }
 
+// 撤销过度使用资源的pod，也就是收quota中的资源被使用超了。需要删除哪些低优先级的pod，来平衡quota的资源使用情况。
 func (controller *QuotaOverUsedRevokeController) revokePodDueToQuotaOverUsed() {
+	// 返回要回收的pod
 	toRevokePods := controller.monitorAll()
+	// 对回收的pod进行驱逐。
 	for _, pod := range toRevokePods {
 		if err := EvictPod(context.TODO(), controller.clientSet, pod, &metav1.DeleteOptions{}); err != nil {
 			klog.Errorf("failed to revoke pod due to quota overused, pod:%v, error:%s",
@@ -188,8 +203,9 @@ func (controller *QuotaOverUsedRevokeController) revokePodDueToQuotaOverUsed() {
 }
 
 func (controller *QuotaOverUsedRevokeController) monitorAll() []*v1.Pod {
+	// 同步所有的quota信息，为没有加入监控的quota加入监控,也就是加入一个monitor。
 	controller.syncQuota()
-
+    // 获取监控的quota
 	monitors := controller.getToMonitorQuotas()
 
 	toRevokePods := make([]*v1.Pod, 0)
@@ -210,12 +226,12 @@ func (controller *QuotaOverUsedRevokeController) syncQuota() {
 		if quotaName == extension.SystemQuotaName || quotaName == extension.RootQuotaName {
 			continue
 		}
-
+       // 增加一个monitor来监控 quota的使用情况。
 		if controller.monitors[quotaName] == nil {
 			controller.addQuota(quotaName)
 		}
 	}
-
+    // 移除已经删除的quota的monitor。
 	for quotaName := range controller.monitors {
 		if _, exist := allQuotaNames[quotaName]; !exist {
 			controller.deleteQuota(quotaName)

@@ -98,6 +98,7 @@ var schedulingHooks = []frameworkext.SchedulingPhaseHook{
 	reservation.NewHook(),
 }
 
+// 这里会注册后台运行的 controller，例如监控 quota资源使用情况的controller: NewQuotaOverUsedRevokeController
 func flatten(plugins map[string]frameworkruntime.PluginFactory) []app.Option {
 	options := make([]app.Option, 0, len(plugins))
 	for name, factoryFn := range plugins {

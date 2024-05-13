@@ -52,6 +52,7 @@ type Controller struct {
 }
 
 // NewElasticQuotaController returns a new *Controller
+// 主要是同步quota的信息到annotation中
 func NewElasticQuotaController(
 	client schedclientset.Interface,
 	eqLister schedlister.ElasticQuotaLister,
@@ -90,6 +91,10 @@ func (ctrl *Controller) Run() {
 
 // syncHandler syncs elastic quotas with local and convert status.used/request/runtime
 // todo: 这里是给qota中的anntion中写入值。
+/*
+// syncHandler 同步弹性配额的使用情况、请求量和运行时间到本地，并转换状态中的 used/request/runtime。
+// 该函数还负责更新quota的注解中存储的request和runtime的值。
+*/
 func (ctrl *Controller) syncHandler() []error {
 	eqList, err := ctrl.eqLister.List(labels.Everything())
 	if err != nil {
@@ -100,6 +105,7 @@ func (ctrl *Controller) syncHandler() []error {
 
 	for _, eq := range eqList {
 		func() {
+			// 获取配额的当前使用情况、请求量和运行时间，也就是说去实时的运行状态。
 			used, request, runtime, err := ctrl.groupQuotaManager.GetQuotaInformationForSyncHandler(eq.Name)
 			if err != nil {
 				errors = append(errors, err)
@@ -107,6 +113,7 @@ func (ctrl *Controller) syncHandler() []error {
 			}
 
 			var oriRuntime, oriRequest v1.ResourceList
+			// 从注解中解析原始的运行时间和请求量
 			if eq.Annotations[extension.AnnotationRequest] != "" {
 				if err := json.Unmarshal([]byte(eq.Annotations[extension.AnnotationRequest]), &oriRequest); err != nil {
 					errors = append(errors, err)
@@ -120,6 +127,7 @@ func (ctrl *Controller) syncHandler() []error {
 				}
 			}
 			// Ignore this loop if the runtime/request/used doesn't change
+			// 如果当前的使用情况、运行时间、请求量与原有的一致，则无需更新
 			if quotav1.Equals(quotav1.RemoveZeros(eq.Status.Used), quotav1.RemoveZeros(used)) &&
 				quotav1.Equals(quotav1.RemoveZeros(oriRuntime), quotav1.RemoveZeros(runtime)) &&
 				quotav1.Equals(quotav1.RemoveZeros(oriRequest), quotav1.RemoveZeros(request)) {

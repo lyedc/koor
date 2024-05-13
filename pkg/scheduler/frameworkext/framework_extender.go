@@ -265,6 +265,7 @@ func PluginFactoryProxy(extendHandle ExtendedHandle, factoryFn frameworkruntime.
 		if impl.servicesEngine != nil {
 			impl.servicesEngine.RegisterPluginService(plugin)
 		}
+		// 在这里注册插件注入例如：Coscheduling， quota等的controller
 		if impl.controllerMaps != nil {
 			impl.controllerMaps.RegisterControllers(plugin)
 		}

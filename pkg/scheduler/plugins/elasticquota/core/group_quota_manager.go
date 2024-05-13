@@ -192,6 +192,7 @@ func (gqm *GroupQuotaManager) RefreshRuntime(quotaName string) v1.ResourceList {
 	return gqm.RefreshRuntimeNoLock(quotaName)
 }
 
+// RefreshRuntimeNoLock 用于刷新指定配额组的运行时资源使用情况，不加锁执行
 func (gqm *GroupQuotaManager) RefreshRuntimeNoLock(quotaName string) v1.ResourceList {
 	quotaInfo := gqm.getQuotaInfoByNameNoLock(quotaName)
 	if quotaInfo == nil {
@@ -201,7 +202,7 @@ func (gqm *GroupQuotaManager) RefreshRuntimeNoLock(quotaName string) v1.Resource
 	if quotaName == extension.SystemQuotaName || quotaName == extension.DefaultQuotaName {
 		return quotaInfo.getMax()
 	}
-
+    // 获取所有的quota的所有的父节点的quotaInfo
 	curToAllParInfos := gqm.getCurToAllParentGroupQuotaInfoNoLock(quotaInfo.Name)
 
 	defer gqm.scopedLockForQuotaInfo(curToAllParInfos)()
@@ -209,11 +210,13 @@ func (gqm *GroupQuotaManager) RefreshRuntimeNoLock(quotaName string) v1.Resource
 	totalRes := gqm.totalResourceExceptSystemAndDefaultUsed.DeepCopy()
 	for i := len(curToAllParInfos) - 1; i >= 0; i-- {
 		quotaInfo = curToAllParInfos[i]
+		// 获取父配额组的运行时配额计算器
 		parRuntimeQuotaCalculator := gqm.getRuntimeQuotaCalculatorByNameNoLock(quotaInfo.ParentName)
 		if parRuntimeQuotaCalculator == nil {
 			klog.Errorf("treeWrapper not exist! parentQuotaName:%v", quotaInfo.ParentName)
 			return nil
 		}
+		// 获取当前配额组的运行时配额计算器
 		subTreeWrapper := gqm.getRuntimeQuotaCalculatorByNameNoLock(quotaInfo.Name)
 		if subTreeWrapper == nil {
 			klog.Errorf("treeWrapper not exist! parentQuotaName:%v", quotaInfo.Name)
@@ -221,6 +224,7 @@ func (gqm *GroupQuotaManager) RefreshRuntimeNoLock(quotaName string) v1.Resource
 		}
 
 		// 1. execute scaleMin logic with totalRes and update scaledMin if needed
+		// 执行最小配额缩放逻辑，并更新缩放后的最小配额
 		if gqm.scaleMinQuotaEnabled {
 			needScale, newMinQuota := gqm.scaleMinQuotaManager.getScaledMinQuota(
 				totalRes, quotaInfo.ParentName, quotaInfo.Name)
@@ -230,12 +234,14 @@ func (gqm *GroupQuotaManager) RefreshRuntimeNoLock(quotaName string) v1.Resource
 		}
 
 		// 2. update parent's runtimeQuota
+		// 更新父配额组的运行时配额
 		if quotaInfo.RuntimeVersion != parRuntimeQuotaCalculator.getVersion() {
 			parRuntimeQuotaCalculator.updateOneGroupRuntimeQuota(quotaInfo)
 		}
 		newSubGroupsTotalRes := quotaInfo.CalculateInfo.Runtime.DeepCopy()
 
 		// 3. update subGroup's cluster resource  when i >= 1 (still has children)
+		// 如果当前配额组还有父配额组，更新父配额组的集群资源总量
 		if i >= 1 {
 			subTreeWrapper.setClusterTotalResource(newSubGroupsTotalRes)
 		}
@@ -345,7 +351,7 @@ func (gqm *GroupQuotaManager) UpdateQuota(quota *v1alpha1.ElasticQuota, isDelete
 			// 更新本地配额信息
 			localQuotaInfo.updateQuotaInfoFromRemote(newQuotaInfo)
 		} else {
-			// 如果配额信息不存在，则直接添加到映射中
+			// 如果配额信息不存在，则直接添加到映射中,调度的时候，主要使用的及时quotaInfo中的信息。
 			gqm.quotaInfoMap[quotaName] = newQuotaInfo
 		}
 	}
@@ -361,6 +367,7 @@ func (gqm *GroupQuotaManager) updateQuotaGroupConfigNoLock() {
 	// 这表明该方法负责重新构建组配额管理器中的拓扑结构，以便正确地管理组之间的层次关系
 	// 组建顶层的quota也就是一个树形的层级结构，包含了父级和子级、
 	// 构建自配额组的拓扑结构。
+	// 把quotaInfoMap中的quotaInfo信息构建成树形结构，并更新到gqm.quotaTopoNodeMap中。
 	gqm.buildSubParGroupTopoNoLock()
 	// reset gqm.runtimeQuotaCalculator
 	// 重置所有组的配额。这意味着该方法负责重置所有组的配额信息，通常是在重新构建拓扑结构之后需要执行的操作，以确保所有配额信息处于正确的状态
@@ -391,6 +398,7 @@ func (gqm *GroupQuotaManager) buildSubParGroupTopoNoLock() {
 		}
 		parQuotaTopoNode := gqm.quotaTopoNodeMap[topoNode.quotaInfo.ParentName]
 		// incase load child before its parent
+		// 表示没有父节点，则创建一个临时的父节点
 		if parQuotaTopoNode == nil {
 			parQuotaTopoNode = NewQuotaTopoNode(&QuotaInfo{
 				Name: topoNode.quotaInfo.ParentName,
@@ -418,7 +426,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 			childRequestMap[quotaName] = topoNode.quotaInfo.CalculateInfo.Request.DeepCopy()
 			childUsedMap[quotaName] = topoNode.quotaInfo.CalculateInfo.Used.DeepCopy()
 		}
-		// 清楚计算后的配额的信息。
+		// 清除计算后的配额的信息。
 		topoNode.quotaInfo.clearForResetNoLock()
 		topoNode.quotaInfo.lock.Unlock()
 	}
@@ -428,6 +436,7 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 	// reset runtimeQuotaCalculator
 	// RootQuotaName: root,相当于是重置了runtime的计算
 	gqm.runtimeQuotaCalculatorMap[extension.RootQuotaName] = NewRuntimeQuotaCalculator(extension.RootQuotaName)
+	// 设置最大的资源
 	gqm.runtimeQuotaCalculatorMap[extension.RootQuotaName].setClusterTotalResource(gqm.totalResourceExceptSystemAndDefaultUsed)
 	rootNode := gqm.quotaTopoNodeMap[extension.RootQuotaName]
 	// 递归遍历每个group中的子group重置里卖弄的配额组的信息。保证正确性 通过父节点的runtime方法计算子节点最大，最小等情况，计算的结果被存储在RuntimeQuotaCalculator的quotaTree中。
@@ -450,7 +459,9 @@ func (gqm *GroupQuotaManager) resetAllGroupQuotaNoLock() {
 func (gqm *GroupQuotaManager) resetAllGroupQuotaRecursiveNoLock(rootNode *QuotaTopoNode) {
 	// 获取全部的叶子节点的资源信息。
 	childGroupQuotaInfos := rootNode.getChildGroupQuotaInfos()
+	// subName是qutoa的名字，topoNode是这个quota的节点信息。
 	for subName, topoNode := range childGroupQuotaInfos {
+		//
 		gqm.runtimeQuotaCalculatorMap[subName] = NewRuntimeQuotaCalculator(subName)
 		// 更新该子配额组的最大配额
 		gqm.updateOneGroupMaxQuotaNoLock(topoNode.quotaInfo)
@@ -680,7 +691,7 @@ func (gqm *GroupQuotaManager) OnPodAdd(quotaName string, pod *v1.Pod) {
 	if quotaInfo != nil && quotaInfo.isPodExist(pod) {
 		return
 	}
-   // pod的信息添加到quta的PodCache对象中
+   // pod的信息添加到quta的PodCache对象中,表示已经进行了调度。
 	gqm.updatePodCacheNoLock(quotaName, pod, true)
 	// 更新tree结构中的request的值，quotaNode,下面是node和info的关系。
 	// quotaNode stores the corresponding quotaInfo's information in a specific resource dimension.
@@ -749,7 +760,7 @@ func (gqm *GroupQuotaManager) GetQuotaInformationForSyncHandler(quotaName string
 	if quotaInfo == nil {
 		return nil, nil, nil, fmt.Errorf("groupQuotaManager doesn't have this quota:%v", quotaName)
 	}
-
+    // 获取runtime的值
 	runtime = gqm.RefreshRuntimeNoLock(quotaName)
 	return quotaInfo.GetUsed(), quotaInfo.GetRequest(), runtime, nil
 }
